@@ -1,0 +1,55 @@
+{
+  "version": "2025.0",
+  "command": {
+    "type": "sequential",
+    "data": {
+      "commands": [
+        {
+          "type": "path",
+          "data": {
+            "pathName": "RS_RR"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "ColumnShot"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "RR_RM"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "ColumnShot"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "SpecialShot"
+          }
+        },
+        {
+          "type": "path",
+          "data": {
+            "pathName": "RM_RL"
+          }
+        },
+        {
+          "type": "named",
+          "data": {
+            "name": "ColumnShot"
+          }
+        }
+      ]
+    }
+  },
+  "resetOdom": true,
+  "folder": null,
+  "choreoAuto": false
+}

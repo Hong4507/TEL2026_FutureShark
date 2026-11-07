@@ -1,0 +1,15 @@
+[Unit]
+Description=FlySky i-BUS to NetworkTables
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=zheng
+WorkingDirectory=/home/zheng/vision
+ExecStart=/home/zheng/yolo-env/bin/python /home/zheng/vision/flysky_nt_publisher.py --port /dev/ttyUSB0 --team 7130
+Restart=always
+RestartSec=1
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
