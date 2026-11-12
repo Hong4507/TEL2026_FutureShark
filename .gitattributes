@@ -1,0 +1,7 @@
+# Files that run on the Jetson / Linux must keep LF line endings,
+# otherwise systemd and bash read the trailing \r as part of paths and commands.
+*.service text eol=lf
+*.py      text eol=lf
+*.sh      text eol=lf
+*.yaml    text eol=lf
+gradlew   text eol=lf
