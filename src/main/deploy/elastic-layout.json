@@ -1,0 +1,653 @@
+{
+  "version": 1.0,
+  "grid_size": 32,
+  "tabs": [
+    {
+      "name": "記分",
+      "grid_layout": {
+        "layouts": [],
+        "containers": [
+          {
+            "title": "左・加分",
+            "x": 0.0,
+            "y": 0.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/LEFT_BONUS",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 192.0,
+            "y": 0.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/LEFT_BONUS",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 256.0,
+            "y": 0.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/LEFT_BONUS",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "左・高",
+            "x": 0.0,
+            "y": 128.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/LEFT_HIGH",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 192.0,
+            "y": 128.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/LEFT_HIGH",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 256.0,
+            "y": 128.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/LEFT_HIGH",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "左・中",
+            "x": 0.0,
+            "y": 256.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/LEFT_MID",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 192.0,
+            "y": 256.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/LEFT_MID",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 256.0,
+            "y": 256.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/LEFT_MID",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "左・低",
+            "x": 0.0,
+            "y": 384.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/LEFT_LOW",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 192.0,
+            "y": 384.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/LEFT_LOW",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 256.0,
+            "y": 384.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/LEFT_LOW",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "中・加分",
+            "x": 352.0,
+            "y": 0.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/MID_BONUS",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 544.0,
+            "y": 0.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/MID_BONUS",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 608.0,
+            "y": 0.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/MID_BONUS",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "中・高",
+            "x": 352.0,
+            "y": 128.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/MID_HIGH",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 544.0,
+            "y": 128.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/MID_HIGH",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 608.0,
+            "y": 128.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/MID_HIGH",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "中・中",
+            "x": 352.0,
+            "y": 256.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/MID_MID",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 544.0,
+            "y": 256.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/MID_MID",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 608.0,
+            "y": 256.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/MID_MID",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "中・低",
+            "x": 352.0,
+            "y": 384.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/MID_LOW",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 544.0,
+            "y": 384.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/MID_LOW",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 608.0,
+            "y": 384.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/MID_LOW",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "右・加分",
+            "x": 704.0,
+            "y": 0.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/RIGHT_BONUS",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 896.0,
+            "y": 0.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/RIGHT_BONUS",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 960.0,
+            "y": 0.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/RIGHT_BONUS",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "右・高",
+            "x": 704.0,
+            "y": 128.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/RIGHT_HIGH",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 896.0,
+            "y": 128.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/RIGHT_HIGH",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 960.0,
+            "y": 128.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/RIGHT_HIGH",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "右・中",
+            "x": 704.0,
+            "y": 256.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/RIGHT_MID",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 896.0,
+            "y": 256.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/RIGHT_MID",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 960.0,
+            "y": 256.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/RIGHT_MID",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "右・低",
+            "x": 704.0,
+            "y": 384.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/RIGHT_LOW",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "+",
+            "x": 896.0,
+            "y": 384.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Plus/RIGHT_LOW",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "−",
+            "x": 960.0,
+            "y": 384.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Minus/RIGHT_LOW",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "預估分數",
+            "x": 1024.0,
+            "y": 0.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/Score",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "半場",
+            "x": 1024.0,
+            "y": 128.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/Half",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "未歸類",
+            "x": 1024.0,
+            "y": 256.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/Unassigned",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "清",
+            "x": 1216.0,
+            "y": 256.0,
+            "width": 64.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/ClearUnassigned",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "Auto 階段",
+            "x": 1024.0,
+            "y": 384.0,
+            "width": 160.0,
+            "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Auto/Stage",
+              "period": 0.06,
+              "data_type": "string",
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "Jetson",
+            "x": 1184.0,
+            "y": 384.0,
+            "width": 96.0,
+            "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/AdvantageKit/Vision/Connected",
+              "period": 0.06,
+              "data_type": "boolean",
+              "true_color": 4283215696,
+              "false_color": 4294198070
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "賽前",
+      "grid_layout": {
+        "layouts": [],
+        "containers": [
+          {
+            "title": "Auto 選擇",
+            "x": 0.0,
+            "y": 0.0,
+            "width": 384.0,
+            "height": 128.0,
+            "type": "ComboBox Chooser",
+            "properties": {
+              "topic": "/Auto Choices",
+              "period": 0.06,
+              "sort_options": false
+            }
+          },
+          {
+            "title": "半場",
+            "x": 384.0,
+            "y": 0.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Scoreboard/Half",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "Jetson 視覺",
+            "x": 576.0,
+            "y": 0.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/AdvantageKit/Vision/Connected",
+              "period": 0.06,
+              "data_type": "boolean",
+              "true_color": 4283215696,
+              "false_color": 4294198070
+            }
+          },
+          {
+            "title": "上半場 加分格發數",
+            "x": 0.0,
+            "y": 192.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/Tuning/Auto/FIRST/BonusBalls",
+              "period": 0.06,
+              "data_type": "double",
+              "show_submit_button": true
+            }
+          },
+          {
+            "title": "下半場 加分格發數",
+            "x": 192.0,
+            "y": 192.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/Tuning/Auto/SECOND/BonusBalls",
+              "period": 0.06,
+              "data_type": "double",
+              "show_submit_button": true
+            }
+          },
+          {
+            "title": "全部歸零",
+            "x": 0.0,
+            "y": 384.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Toggle Button",
+            "properties": {
+              "topic": "/Scoreboard/Reset",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

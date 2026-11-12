@@ -185,3 +185,14 @@ compile_commands.json
 
 # Eclipse generated file for annotation processors
 .factorypath
+
+# Jetson / YOLO 訓練產物（太大，不進 git）
+src/main/java/frc/jetson_tools/recordings/
+src/main/java/frc/jetson_tools/frames/
+src/main/java/frc/jetson_tools/captures/
+src/main/java/frc/jetson_tools/datasets/
+src/main/java/frc/jetson_tools/runs/
+src/main/java/frc/jetson_tools/calib_images/
+src/main/java/frc/jetson_tools/__pycache__/
+*.engine
+*.onnx

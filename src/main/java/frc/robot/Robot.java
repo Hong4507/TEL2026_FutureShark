@@ -14,7 +14,9 @@ import org.littletonrobotics.junction.wpilog.WPILOGReader;
 import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 
 import org.wpilib.math.geometry.Translation3d;
+import org.wpilib.net.WebServer;
 import org.wpilib.networktables.NetworkTableInstance;
+import org.wpilib.system.Filesystem;
 import org.wpilib.command2.Command;
 import org.wpilib.command2.CommandScheduler;
 
@@ -48,6 +50,9 @@ public class Robot extends LoggedRobot {
     Logger.start();
     
     m_robotContainer = new RobotContainer();
+
+    // 讓 Elastic 可以「Load Layout from Robot」：把 deploy 資料夾（含 elastic-layout.json）開在 port 5800
+    WebServer.start(5800, Filesystem.getDeployDirectory().getPath());
   }
 
   @Override

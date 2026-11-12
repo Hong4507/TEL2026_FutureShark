@@ -100,7 +100,7 @@ test {
 
 // Simulation configuration (e.g. environment variables).
 wpi.sim.addGui().defaultEnabled = true
-wpi.sim.addDriverstation()
+wpi.sim.addDriverstation().defaultEnabled = true  // 讓 MockDS（FlySky 左開關）在模擬器也能 enable
 
 application.mainClass = ROBOT_MAIN_CLASS
 

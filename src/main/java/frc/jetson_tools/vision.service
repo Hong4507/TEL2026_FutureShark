@@ -1,0 +1,18 @@
+[Unit]
+Description=Nine-grid YOLO vision to NetworkTables
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=zheng
+WorkingDirectory=/home/zheng/tel2026/jetson_tools
+# 換模型或校正檔時改這行，然後 sudo systemctl daemon-reload && sudo systemctl restart vision
+# 尚無 camera_calib.yaml：用 --hfov 針孔近似（對準時目標在畫面中央，誤差可忽略）。
+# 有校正檔後加上 --calib /home/zheng/tel2026/jetson_tools/camera_calib.yaml
+ExecStart=/home/zheng/yolo-env/bin/python /home/zheng/tel2026/jetson_tools/vision_nt_publisher.py --model /home/zheng/tel2026/models/best.engine --team 7130
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

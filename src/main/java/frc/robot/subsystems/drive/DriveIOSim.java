@@ -5,6 +5,7 @@ import static frc.robot.subsystems.drive.DriveConstants.*;
 import org.wpilib.math.controller.PIDController;
 import org.wpilib.math.controller.SimpleMotorFeedforward;
 import org.wpilib.math.system.DCMotor;
+import org.wpilib.driverstation.RobotState;
 import org.wpilib.simulation.DifferentialDrivetrainSim;
 import frc.robot.Constants;
 
@@ -31,7 +32,14 @@ public class DriveIOSim implements DriveIO {
 
   @Override
   public void updateInputs(DriveIOInputs inputs) {
-    if (closedLoop) {
+    if (RobotState.isDisabled()) {
+      // 實機 disable 時 HAL 會切斷馬達輸出；模擬要自己歸零，否則閉迴路會沿用最後的目標速度繼續跑
+      closedLoop = false;
+      leftAppliedVolts = 0.0;
+      rightAppliedVolts = 0.0;
+      leftPID.reset();
+      rightPID.reset();
+    } else if (closedLoop) {
       leftAppliedVolts = leftFFVolts + leftPID.calculate(driveSim.getLeftVelocity());
       rightAppliedVolts = rightFFVolts + rightPID.calculate(driveSim.getRightVelocity());
     }

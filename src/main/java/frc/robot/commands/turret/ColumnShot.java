@@ -32,6 +32,7 @@ public class ColumnShot extends Command {
   public void initialize() {
     reloadTimer.reset();
     tureFiredCount = 0;
+    turret.setAimHeight(targetHeightMeters); // 給記分板判斷這發是哪一列
   }
 
   @Override
@@ -65,6 +66,7 @@ public class ColumnShot extends Command {
   public void end(boolean interrupted) {
     turret.setVelocity(0);
     turret.setTrigger(0);
+    turret.setAimHeight(Double.NaN);
     reloadTimer.stop();
   }
 

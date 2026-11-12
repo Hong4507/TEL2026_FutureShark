@@ -9,6 +9,13 @@ public class Turret extends SubsystemBase {
   private final TurretIO io;
   private final TurretIOInputsAutoLogged inputs = new TurretIOInputsAutoLogged();
 
+  /** 目前瞄準的目標高度（公尺）；ColumnShot 設定，手動射擊時為 NaN（記分板無法判斷是哪一列）。 */
+  private double aimHeightMeters = Double.NaN;
+  /** 扳機從斷電變成通電的次數 = 射出的球數。 */
+  private int shotCount = 0;
+  private double lastShotAimHeightMeters = Double.NaN;
+  private boolean triggerOn = false;
+
   public Turret(TurretIO io) {
     this.io = io;
   }
@@ -44,7 +51,26 @@ public class Turret extends SubsystemBase {
   }
 
   public void setTrigger(double volts) {
+    if (volts > 0 && !triggerOn) {
+      shotCount++;
+      lastShotAimHeightMeters = aimHeightMeters;
+      Logger.recordOutput("Turret/ShotCount", shotCount);
+    }
+    triggerOn = volts > 0;
     io.setTrigger(volts);
+  }
+
+  public void setAimHeight(double heightMeters) {
+    aimHeightMeters = heightMeters;
+  }
+
+  public int getShotCount() {
+    return shotCount;
+  }
+
+  /** 最近一發射出時瞄準的高度；NaN 表示不是 ColumnShot 射的。 */
+  public double getLastShotAimHeight() {
+    return lastShotAimHeightMeters;
   }
 
   public Trigger ballFired() {
