@@ -1,0 +1,18 @@
+[Unit]
+Description=Turret TF-Luna (I2C) to NetworkTables
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=zheng
+# 讀 /dev/i2c-* 需要 i2c 群組：sudo usermod -aG i2c zheng
+SupplementaryGroups=i2c
+WorkingDirectory=/home/zheng/tel2026/jetson_tools
+ExecStart=/home/zheng/yolo-env/bin/python /home/zheng/tel2026/jetson_tools/turret_tfluna_nt_publisher.py --bus 7 --team 7130
+Restart=always
+RestartSec=1
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

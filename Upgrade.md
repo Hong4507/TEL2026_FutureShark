@@ -486,7 +486,24 @@ YOLO 只負責**水平對準**九宮格的某一欄；牆面角度仍由 TF-Luna
   - `VisionAlign`：`kLostTimeoutSec` 0.5 → 1.5、`kAcquireTimeoutSec` 1.0 → 2.0。看丟期間靠里程計追，到位就停著等。
   - `VisionIOSim.dropoutFrom/Until` 模擬斷線；`VisionAlignSimTest.survivesCameraDropout`：斷線 1.2 秒發生在開始後 0/0.3/0.8/1.5 秒，改之前 3/4 失敗（落點差 0.60/0.24/0.08 m），改之後全過（≤ 1.7 cm，時間 2.1~3.5 s）。全部測試通過。
 - Limelight 2 當網路攝影機（試用）：`open_camera` 遇到 `http://`、`https://`、`rtsp://` 改用 FFmpeg 讀串流，曝光／白平衡交給 Limelight 網頁；斷線重連同樣適用。`vision.service` 只加註解範例（`--device http://10.71.30.12:5802/ --hfov 59.6`），實測串流在 port **5802**、640x480、15 fps 後，`vision.service` 改用 Limelight 2（`--device http://10.71.30.12:5802/ --hfov 59.6`），OV9281 與 webcam 參數留在註解。Limelight 預設 IP 10.TE.AM.11 會和 Jetson 衝突，要先改成 .12；需要網路交換器連 SystemCore、Jetson、Limelight。規則要求自動期用 AI 辨識，所以 YOLO 仍在 Jetson 跑。
+- 實機確認（2026-11-14）：Limelight 2 視角 **HFOV 62.5°、VFOV 48.9°**（取代規格值 59.6），`vision.service` 改成 `--hfov 62.5`；綠色補光 LED 已關。FlySky 經 USB-TTL 讀取上機測試正常。
 - ⚠️ 實機 dmesg 看到 OV9281 反覆 `USB disconnect`／`error -71`（接在 Jetson 的 USB 2.0 Hub 上），這是硬體連線問題，固定路徑救不了：要換線、直插 Jetson 本體 USB 孔。
+
+## Storage 三馬達、補球觸發、砲台絕對編碼器（2026-11-14）
+
+- **Storage 改成三顆馬達**（左 storage、右 storage、trigger），用兩塊 L298N。Smart I/O 0~5 全部接 IN 腳，改用 `DigitalOutput` 只控制開關與方向；ENA／ENB 的 jumper 要**插著**（常開）→ 馬達開啟就是全速（roboRIO 時代約 40%）。
+  - 0 Trigger 反轉、1 Trigger 正轉、2 左 Storage 反轉、3 左 Storage 正轉、4 右 Storage 反轉、5 右 Storage 正轉（`StorageConstants`）。
+  - `Stroage` 對外方法不變；`setStorageSpeed` 同時控制左右兩顆，速度只看是否為 0。兩顆方向相反時請對調該馬達的 OUT 線。
+- **`Turret.ballFired()`**：原本看扳機 SparkMax 回報電壓 `< 3`，扳機馬達 inverted 時回報值可能是負的 → 永遠成立 → `Reload` 從不觸發，Storage 一直停在 `Normal` 整理球。改成看程式下的指令（扳機通電 → 斷電）。⚠️ 未上機確認。第一顆球仍不會預先補上（第一次射擊可能空射）。
+- **砲台仰角改用 CANcoder 絕對位置**：拿掉開機 `setPosition`（原本把開機位置當成最低角度），改讀 `getAbsolutePosition()`，最低點 = 0 圈，行程約 0.82 圈。新增 `kEncoderMagnetOffsetRot`（⚠️ **待上機校正**，目前 0）與 `kEncoderDiscontinuityPointRot = 0.9`，log `Turret/PitchEncoderAbsRot`。
+
+## 插值表、砲台 TF-Luna、Elastic 狀態頁（2026-11-14）
+
+- **射球仰角插值表 `ShotTable`**（`subsystems/turret/ShotTable.java`）：每列（低／中／高／加分格）一張「`RangeSensor/TargetDistance` → 仰角 rad」表，表內線性插值；表外用原彈道公式加上端點差（連續、不跳）；某列少於 2 點就完全用原公式（所以表空著時行為和以前一樣）。`ColumnShot`、`AssistTurret` 改呼叫 `ShotTable.pitchRad()`，彈道係數 `0.019358` 移到 `ShotTable.kBallisticCoefficient`。log：`ShotTable/Row`、`Source`（TABLE／EXTRAPOLATED／FORMULA）、`DistanceMeters`、`PitchRad`。`ShotTableTest` 4 項。
+- **`ManualTurret` 量表輔助**：NT `/Tuning/Manual/PitchRad` > 0 → 仰角固定在這個值（不看搖桿）；每次擊發印一行 `ShotTable 樣本 {距離, 仰角}, // 實際仰角、飛輪是否到速、砲台 TF-Luna 距離`（console + `ShotTable/Sample`）。量測步驟：Checklist §5.6。
+- **砲台 TF-Luna（第三顆）**：裝在砲台水平正前方、照九宮格的洞，I2C 接 Jetson（排針 pin 3/5 = `/dev/i2c-7`，位址 0x10）。Jetson 跑 `jetson_tools/turret_tfluna_nt_publisher.py`（smbus2，100 Hz，NT 表 `TurretLidar`：distance／strength／temperature／heartbeat／i2cErrors，periodic 10 ms + flush），服務檔 `turret-tfluna.service`。機器人端 `subsystems/turretlidar/*`（`TurretLidarIONT`，0.25 s 沒新 heartbeat 算斷線；有效範圍與強度門檻同左右兩顆）。**目前只記錄與顯示，沒有拿來控制**；量表時一併記下，之後可決定改用它當查表距離。安裝：Checklist §5.7。
+- **Elastic 改版**：移除「記分」分頁（第二操作手不能碰電腦），新增「狀態」分頁，資料來自新的 `StatusBoard`（`/AdvantageKit/RealOutputs/Status/...`）：模式、飛輪（停止／加速 xx%／就緒）、仰角、射出數、電池、目標距離、砲台 TF-Luna 距離、Auto 階段、Enabled，以及 9 個連線燈（遙控器、Jetson 視覺、左右 TF-Luna、砲台 TF-Luna、上下飛輪 TalonFX、仰角 CANcoder、IMU）；警示列列出所有未連線的部件與電池低（< 11.5 V）。「賽前」分頁拿掉「全部歸零」，加上「手動固定仰角」和「最後一筆查表樣本」。`Scoreboard` 程式保留（仍會記 log），只是不再顯示。
+  - `TurretIO` 新增 `upConnected`／`downConnected`／`encoderConnected`（Phoenix `BaseStatusSignal.isAllGood`）；`Drive.isGyroConnected()`；`DualTFLunaRangeSensor.isLeft/RightConnected()`；開機先 log `Mode = disable`。
 
 ---
 
@@ -499,3 +516,5 @@ YOLO 只負責**水平對準**九宮格的某一欄；牆面角度仍由 TF-Luna
 5. **IMU 安裝方向**：確認 `GyroIOOnboardIMU` 的 `MountOrientation`。
 6. **MockDS**：✅ 已在 SystemCore 實機確認可以用 FlySky 左開關啟用和停用機器人（2026-11-07）。
 7. **待函式庫出 2027 版後可恢復**：MapleSim（移除 `build.gradle` 的 `exclude`、恢復 `Robot.simulationPeriodic()`）、URCL（恢復 `Logger.registerURCL`）。
+8. **砲台 CANcoder 校正**：`kEncoderMagnetOffsetRot` 先 0 部署 → 砲台放最低點 → 讀 `Turret/PitchEncoderAbsRot` → 填它的負值。往上推時讀值應變大，變小代表要反轉 `SensorDirection`。
+9. **Storage 補球**：射一發後 `Turret/ShotCount` +1，Storage 應反轉 0.3 秒再正轉送球。

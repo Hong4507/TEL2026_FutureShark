@@ -4,8 +4,8 @@ import org.wpilib.system.Timer;
 import org.wpilib.command2.Command;
 import frc.FSLib.rangefinder.RangeSensors;
 import frc.FSLib.rangefinder.TargetRangeSensor;
-import frc.FSLib.util.Util;
 import frc.robot.subsystems.turret.Turret;
+import frc.robot.subsystems.turret.ShotTable;
 import frc.robot.subsystems.turret.TurretConstants;
 
 public class ColumnShot extends Command {
@@ -38,11 +38,7 @@ public class ColumnShot extends Command {
   @Override
   public void execute() {
     double distance = rangeSensor.getTargetDistance();
-    pitch = Util.clamp(
-      Math.PI / 2 - Math.atan2(targetHeightMeters - TurretConstants.kTurretToRobotCenter.getZ() + Math.pow(distance, 2) * 0.019358, distance),
-      TurretConstants.kMinAngleRad,
-      TurretConstants.kMaxAngleRad
-    );
+    pitch = ShotTable.pitchRad(targetHeightMeters, distance); // 查表（表空著時 = 原本的彈道公式）
     turret.setVelocity(targetVelocity, targetVelocity * 0.8);
     turret.setPitch(pitch);
 

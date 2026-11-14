@@ -32,11 +32,15 @@ import frc.robot.subsystems.drive.DriveIOSpark;
 import frc.robot.subsystems.drive.GyroIO;
 import frc.robot.subsystems.drive.GyroIOOnboardIMU;
 import frc.robot.subsystems.scoreboard.Scoreboard;
+import frc.robot.subsystems.status.StatusBoard;
 import frc.robot.subsystems.storage.Stroage;
 import frc.robot.subsystems.turret.Turret;
 import frc.robot.subsystems.turret.TurretIO;
 import frc.robot.subsystems.turret.TurretReal;
 import frc.robot.subsystems.turret.TurretSim;
+import frc.robot.subsystems.turretlidar.TurretLidar;
+import frc.robot.subsystems.turretlidar.TurretLidarIO;
+import frc.robot.subsystems.turretlidar.TurretLidarIONT;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.subsystems.vision.VisionIO;
 import frc.robot.subsystems.vision.VisionIONT;
@@ -46,6 +50,8 @@ public class RobotContainer {
   private final Drive drive;
   private final Turret turret;
   private final Vision vision;
+  /** 砲台正前方的 TF-Luna（接 Jetson，經 NT）。 */
+  private final TurretLidar turretLidar;
   private final Stroage stroage = new Stroage();
 
   private CommandFlySkyController controller;
@@ -66,6 +72,7 @@ public class RobotContainer {
         drive = new Drive(new DriveIOSpark(), new GyroIOOnboardIMU());
         turret = new Turret(new TurretReal());
         vision = new Vision(new VisionIONT());
+        turretLidar = new TurretLidar(new TurretLidarIONT());
         break;
       
       case kSim:
@@ -75,12 +82,15 @@ public class RobotContainer {
         vision = "nt".equalsIgnoreCase(System.getenv("VISION_IO"))
             ? new Vision(new VisionIONT())
             : new Vision(new VisionIOSim(drive::getPose));
+        // 模擬沒有這顆感測器；用 NT 版本，可以拿 Jetson 或假的 publisher 測
+        turretLidar = new TurretLidar(new TurretLidarIONT());
         break;
 
       default:
         drive = new Drive(new DriveIO() {}, new GyroIO() {});
         turret = new Turret(new TurretIO() {});
         vision = new Vision(new VisionIO() {});
+        turretLidar = new TurretLidar(new TurretLidarIO() {});
         break;
     }
 
@@ -104,6 +114,8 @@ public class RobotContainer {
     Logger.recordOutput("Auto/Stage", "Idle");
 
     controller = new CommandFlySkyController();
+    new StatusBoard(drive, turret, vision, turretLidar, () -> controller.getHID().isConnected());
+    Logger.recordOutput("Mode", "disable");
     drive.setDefaultCommand(DriveCommands.arcadeDrive(drive, () -> controller.getLeftY(), () -> -controller.getLeftX()));
 
     stroage.setDefaultCommand(new Normal(stroage));
@@ -174,7 +186,8 @@ public class RobotContainer {
     controller.rightSwitch().and(isManual())
       .whileTrue(
         Commands.parallel(
-          new ManualTurret(turret, () -> controller.getRightY(), () -> controller.getLeftX() > 0.3),
+          new ManualTurret(turret, () -> controller.getRightY(), () -> controller.getLeftX() > 0.3,
+            () -> turretLidar.getDistanceMeters().orElse(Double.NaN)),
           Commands.idle(drive)
         )
       );

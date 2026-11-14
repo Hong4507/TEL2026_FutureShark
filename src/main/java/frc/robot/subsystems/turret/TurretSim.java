@@ -12,6 +12,9 @@ public class TurretSim implements TurretIO {
   @Override
   public void updateInputs(TurretIOInputs inputs) {
     inputs.pitchPositionRad = pitch;
+    inputs.upConnected = true;
+    inputs.downConnected = true;
+    inputs.encoderConnected = true;
     inputs.upVelocityRadPerSec = upSpeed;
     inputs.downVelocityRadPerSec = downSpeed;
   }

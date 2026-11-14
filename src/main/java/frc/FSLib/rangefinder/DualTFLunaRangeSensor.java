@@ -121,6 +121,17 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
     return cached;
   }
 
+  /** 最近一次讀取時左邊那顆有回應（I2C 傳輸成功）。 */
+  public boolean isLeftConnected() {
+    read();
+    return left.connected;
+  }
+
+  public boolean isRightConnected() {
+    read();
+    return right.connected;
+  }
+
   @Override
   public double getTargetDistance() {
     Reading reading = read();

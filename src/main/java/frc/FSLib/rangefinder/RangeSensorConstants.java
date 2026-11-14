@@ -9,7 +9,7 @@ public final class RangeSensorConstants {
 
   /**
    * 兩顆 TF-Luna 的 I2C 埠與位址（TF-Luna 預設 0x10）。
-   * 預設一顆接 I2C 0、一顆接 I2C 1，兩顆都用出廠位址，不用改設定。
+   * 左右以「機器人面向目標」為準：左邊那顆接 I2C 0、右邊那顆接 I2C 1，兩顆都用出廠位址，不用改設定。
    * 若兩顆接同一個埠，必須先把其中一顆改成不同位址（例如 0x11），再改這裡。
    */
   public static final I2C.Port kLeftTFLunaPort = I2C.Port.PORT_0;

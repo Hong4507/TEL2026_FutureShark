@@ -86,6 +86,35 @@
 | 5.4 | 算策略發數 | `python src/main/java/frc/jetson_tools/strategy_calc.py --bonus 6/10 --hole 14/20` | 把建議值寫進 `/Tuning/Auto/FIRST/BonusBalls`、`BallsPerHole`（下半場 `SECOND`） | |
 | 5.5 | （看 5.1）飛輪不停 | 如果起轉 > 1 s：考慮讓自動流程整段飛輪持續轉，不在每次 `ColumnShot.end()` 停 | 決定要不要改 | |
 
+### 5.6 插值表（ShotTable）量測
+
+前提：1.6／1.7 TF-Luna 距離已校好、砲台 CANcoder 已校正（Upgrade §4-8），否則量出來的表沒用。
+
+1. FlySky 切 **Manual**，右開關打開 → `ManualTurret`。
+2. Elastic「賽前」分頁的「手動固定仰角 rad」填一個值（例如 `1.20`）按送出 → 仰角固定，不看搖桿；填 `0` 回到搖桿。
+3. 機器人擺在某個距離、對準一欄，射一發 → console（和 Elastic「最後一筆查表樣本」）出現：
+   `ShotTable 樣本 {2.512, 1.2000}, // #3 實際仰角 1.1987, 飛輪到速, 砲台TF-Luna 2.430 m`
+   - 「飛輪未到速」的那發不算。
+4. 偏高就減仰角、偏低就加，一次 0.01~0.02 rad，直到**連續 3 發**都進 → 那一行的 `{距離, 仰角},` 抄下來。
+5. 每列（低／中／高／加分格）至少 2 個距離，建議 3 個（例如 2.3、2.5、2.8 m，涵蓋比賽實際會停的位置）。
+6. 貼進 `subsystems/turret/ShotTable.java` 的 `kLow`／`kMid`／`kHigh`／`kBonus`，重新部署。
+7. 驗證：Auto 模式的 `ColumnShot` 射，看 `ShotTable/Source` = `TABLE`（超出量測範圍會是 `EXTRAPOLATED`）。
+
+| 列 | 距離 1 | 距離 2 | 距離 3 |
+|----|--------|--------|--------|
+| 低 | {___, ___} | {___, ___} | {___, ___} |
+| 中 | {___, ___} | {___, ___} | {___, ___} |
+| 高 | {___, ___} | {___, ___} | {___, ___} |
+| 加分格 | {___, ___} | {___, ___} | {___, ___} |
+
+### 5.7 砲台 TF-Luna（Jetson I2C）
+
+1. 接線見 `jetson_tools/turret_tfluna_nt_publisher.py` 開頭（**CFG 腳接 GND**）。Jetson 上 `sudo i2cdetect -y -r 7` 在 0x10 看到 `10`。
+2. 複製 `turret_tfluna_nt_publisher.py`、`turret-tfluna.service` 到 `~/tel2026/jetson_tools/`；`/home/zheng/yolo-env/bin/pip install smbus2`；`sudo usermod -aG i2c zheng`。
+3. 先 `python turret_tfluna_nt_publisher.py --print-only` 看數值，手擋在前面會變小。
+4. 裝成服務：`sudo cp turret-tfluna.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now turret-tfluna`。
+5. Elastic「狀態」分頁「砲台TF-Luna」變綠、距離有值。
+
 ---
 
 ## 6. VisionAlign 實機（約 30 分）
@@ -115,9 +144,11 @@
 
 ---
 
-## 8. Elastic 記分板
+## 8. Elastic 狀態頁
 
-- [ ] 「記分」分頁：自動流程跑完，射球數有自動加；+／− 按鈕能修正
+- [ ] Elastic 重新載入 `elastic-layout.json`（記分頁已移除，第二操作手不碰電腦）
+- [ ] 「狀態」分頁：模式、飛輪（停止／加速 xx%／就緒）、仰角、射出數、電池都有值
+- [ ] 拔掉任一感測器（例如砲台 TF-Luna）→ 對應燈變紅、警示列出現它的名字
 - [ ] 「賽前」分頁：Vision Connected、TF-Luna、Auto Choices 都有值
 - [ ] 筆電 14 吋 150% 縮放下版面不被切掉
 

@@ -99,6 +99,10 @@ public class Drive extends SubsystemBase {
   }
 
   @AutoLogOutput
+  public boolean isGyroConnected() {
+    return gyroInputs.connected;
+  }
+
   public Pose2d getPose() {
     return odometry.getPose();
   }

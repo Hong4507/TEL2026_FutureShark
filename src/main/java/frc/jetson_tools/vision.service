@@ -18,9 +18,9 @@ WorkingDirectory=/home/zheng/tel2026/jetson_tools
 # 換回 jsing wb1 webcam：--device /dev/v4l/by-id/usb-WCM_USB_WEB_CAM-video-index0 --width 640 --height 480 --exposure auto --wb auto
 #   （它沒有曝光／白平衡控制，720p 跑不到 30 fps）
 # Limelight 2 注意：IP 要從預設 .11 改成 .12（避免和 Jetson 衝突）；綠色補光 LED 要關；
-#   hfov 59.6 是 Limelight 2 規格值，請再確認；曝光在 Limelight 網頁 http://10.71.30.12:5801 設。
+#   2026-11-14 實測 HFOV 62.5°、VFOV 48.9°（640x480 方形像素下兩者一致，只需給 --hfov）；綠燈已關；曝光在 Limelight 網頁 http://10.71.30.12:5801 設。
 # 有校正檔後加上 --calib /home/zheng/tel2026/jetson_tools/camera_calib.yaml
-ExecStart=/home/zheng/yolo-env/bin/python /home/zheng/tel2026/jetson_tools/vision_nt_publisher.py --model /home/zheng/tel2026/models/best.engine --team 7130 --device http://10.71.30.12:5802/ --hfov 59.6 --exposure auto --wb auto
+ExecStart=/home/zheng/yolo-env/bin/python /home/zheng/tel2026/jetson_tools/vision_nt_publisher.py --model /home/zheng/tel2026/models/best.engine --team 7130 --device http://10.71.30.12:5802/ --hfov 62.5 --exposure auto --wb auto
 Restart=always
 RestartSec=2
 Environment=PYTHONUNBUFFERED=1

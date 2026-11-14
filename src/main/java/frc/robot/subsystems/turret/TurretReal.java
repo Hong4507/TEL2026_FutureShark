@@ -7,6 +7,7 @@ import static frc.robot.subsystems.turret.TurretConstants.*;
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.CANBus;
 import com.ctre.phoenix6.StatusSignal;
+import com.ctre.phoenix6.configs.CANcoderConfiguration;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.MotionMagicVelocityVoltage;
 import com.ctre.phoenix6.hardware.CANcoder;
@@ -42,7 +43,8 @@ public class TurretReal implements TurretIO {
   private final StatusSignal<Voltage> upVoltage = upShooterMotor.getMotorVoltage();
   private final StatusSignal<AngularVelocity> downVelocity = downShooterMotor.getVelocity();
   private final StatusSignal<Voltage> downVoltage = downShooterMotor.getMotorVoltage();
-  private final StatusSignal<Angle> pitch = encoder.getPosition();
+  /** 絕對位置（單圈），砲台最低點 = 0 圈（由 kEncoderMagnetOffsetRot 校正）。 */
+  private final StatusSignal<Angle> pitch = encoder.getAbsolutePosition();
 
   private final MotionMagicVelocityVoltage shooterMotorRequest = new MotionMagicVelocityVoltage(0);
 
@@ -79,7 +81,12 @@ public class TurretReal implements TurretIO {
     downShooterMotor.getConfigurator().apply(downShooterConfig);
     downShooterMotor.setPosition(0);
 
-    encoder.setPosition(TurretConstants.kMinAngleRad * kSensorToMechanismRatio / 2 / Math.PI);
+    // 用 CANcoder 絕對位置決定仰角，開機時砲台停在哪裡都可以（不再把開機位置當成最低點）
+    CANcoderConfiguration encoderConfig = new CANcoderConfiguration();
+    encoderConfig.MagnetSensor
+      .withMagnetOffset(kEncoderMagnetOffsetRot)
+      .withAbsoluteSensorDiscontinuityPoint(kEncoderDiscontinuityPointRot);
+    encoder.getConfigurator().apply(encoderConfig);
 
     BaseStatusSignal.setUpdateFrequencyForAll(100, upVelocity, upVoltage, downVelocity, downVoltage, pitch);
     upShooterMotor.optimizeBusUtilization();
@@ -111,7 +118,11 @@ public class TurretReal implements TurretIO {
   @Override
   public void updateInputs(TurretIOInputs inputs) {
     BaseStatusSignal.refreshAll(pitch, upVelocity, upVoltage, downVelocity, downVoltage);
-    inputs.pitchPositionRad = pitch.getValue().in(Radians) / kSensorToMechanismRatio;
+    inputs.upConnected = BaseStatusSignal.isAllGood(upVelocity, upVoltage);
+    inputs.downConnected = BaseStatusSignal.isAllGood(downVelocity, downVoltage);
+    inputs.encoderConnected = BaseStatusSignal.isAllGood(pitch);
+    inputs.pitchPositionRad = getPitchRad();
+    inputs.pitchEncoderAbsRot = pitch.getValueAsDouble();
     inputs.upVelocityRadPerSec = upVelocity.getValue().in(RadiansPerSecond);
     inputs.upAppliedVolts = upVoltage.getValueAsDouble();
     inputs.downVelocityRadPerSec = downVelocity.getValue().in(RadiansPerSecond);
@@ -128,7 +139,12 @@ public class TurretReal implements TurretIO {
 
   @Override
   public void setPitch(double pitchPositionRad) {
-    angleMotor.setVoltage(pitchPID.calculate(pitch.getValue().in(Radians) / kSensorToMechanismRatio, pitchPositionRad));
+    angleMotor.setVoltage(pitchPID.calculate(getPitchRad(), pitchPositionRad));
+  }
+
+  /** 絕對位置 0 圈 = 最低角度，往上每 kSensorToMechanismRatio 圈 = 砲台轉一圈。 */
+  private double getPitchRad() {
+    return kMinAngleRad + pitch.getValue().in(Radians) / kSensorToMechanismRatio;
   }
 
   @Override

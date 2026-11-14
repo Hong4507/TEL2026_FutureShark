@@ -42,6 +42,23 @@ public class Turret extends SubsystemBase {
     return Math.abs(inputs.upVelocityRadPerSec - upTargetVelocityRadPerSec) + Math.abs(inputs.downVelocityRadPerSec - downTargetVelocityRadPerSec) < 10;
   }
 
+  public double getUpVelocityRadPerSec() {
+    return inputs.upVelocityRadPerSec;
+  }
+
+  /** 上下飛輪 TalonFX 與仰角 CANcoder 都有回應。 */
+  public boolean isUpConnected() {
+    return inputs.upConnected;
+  }
+
+  public boolean isDownConnected() {
+    return inputs.downConnected;
+  }
+
+  public boolean isEncoderConnected() {
+    return inputs.encoderConnected;
+  }
+
   public double getPitchPositionRad() {
     return inputs.pitchPositionRad;
   }
@@ -73,8 +90,14 @@ public class Turret extends SubsystemBase {
     return lastShotAimHeightMeters;
   }
 
+  /**
+   * 扳機「通電 → 斷電」的那一刻 = 剛射完一顆，搭配 onTrue 觸發 Storage 補球。
+   *
+   * <p>用程式下的指令（triggerOn）判斷，不用 SparkMax 回報的電壓：扳機馬達設了 inverted，
+   * 回報的電壓可能是負的，永遠 &lt; 3，onTrue 就永遠不會觸發，Storage 一直停在整理球模式。
+   */
   public Trigger ballFired() {
-    return new Trigger(() -> inputs.triggerVolts < 3);
+    return new Trigger(() -> !triggerOn);
   }
 
 }

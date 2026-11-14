@@ -1,0 +1,124 @@
+package frc.robot.subsystems.status;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.function.BooleanSupplier;
+
+import org.littletonrobotics.junction.Logger;
+import org.wpilib.command2.SubsystemBase;
+import org.wpilib.driverstation.RobotState;
+import org.wpilib.system.RobotController;
+
+import frc.FSLib.rangefinder.DualTFLunaRangeSensor;
+import frc.FSLib.rangefinder.RangeSensors;
+import frc.FSLib.rangefinder.TargetRangeSensor;
+import frc.robot.Constants;
+import frc.robot.subsystems.drive.Drive;
+import frc.robot.subsystems.turret.Turret;
+import frc.robot.subsystems.turret.TurretConstants;
+import frc.robot.subsystems.turretlidar.TurretLidar;
+import frc.robot.subsystems.vision.Vision;
+
+/**
+ * Elastic「狀態」分頁的資料來源：機器人模式、射擊狀態、各部件連線。
+ * 第二操作手不能碰電腦，所以這頁只有顯示、沒有按鈕，而且盡量做成一眼看得懂的文字。
+ *
+ * <p>全部發布在 {@code /AdvantageKit/RealOutputs/Status/...}（版面：{@code elastic-layout.json}）。
+ */
+public class StatusBoard extends SubsystemBase {
+  /** 電池低於這個電壓就在警示列提醒。 */
+  public static final double kLowBatteryVolts = 11.5;
+  /** 飛輪低於這個速度（rad/s）視為停止。 */
+  private static final double kStoppedRadPerSec = 5;
+
+  private final Turret turret;
+  private final TurretLidar turretLidar;
+
+  /** 名稱 → 是否連線；順序就是警示列的順序。 */
+  private final Map<String, BooleanSupplier> connections = new LinkedHashMap<>();
+
+  public StatusBoard(Drive drive, Turret turret, Vision vision, TurretLidar turretLidar, BooleanSupplier flySkyConnected) {
+    this.turret = turret;
+    this.turretLidar = turretLidar;
+
+    TargetRangeSensor range = RangeSensors.get();
+    DualTFLunaRangeSensor luna = range instanceof DualTFLunaRangeSensor d ? d : null;
+
+    connections.put("FlySky", flySkyConnected);
+    connections.put("Vision", vision::isConnected);
+    connections.put("TFLunaLeft", () -> luna == null || luna.isLeftConnected());
+    connections.put("TFLunaRight", () -> luna == null || luna.isRightConnected());
+    connections.put("TurretLidar", turretLidar::isConnected);
+    connections.put("ShooterUp", turret::isUpConnected);
+    connections.put("ShooterDown", turret::isDownConnected);
+    connections.put("PitchEncoder", turret::isEncoderConnected);
+    connections.put("Gyro", drive::isGyroConnected);
+  }
+
+  /** 警示列用的中文名稱。 */
+  private static String label(String key) {
+    return switch (key) {
+      case "FlySky" -> "遙控器";
+      case "Vision" -> "Jetson視覺";
+      case "TFLunaLeft" -> "左TF-Luna";
+      case "TFLunaRight" -> "右TF-Luna";
+      case "TurretLidar" -> "砲台TF-Luna";
+      case "ShooterUp" -> "上飛輪";
+      case "ShooterDown" -> "下飛輪";
+      case "PitchEncoder" -> "仰角編碼器";
+      case "Gyro" -> "IMU";
+      default -> key;
+    };
+  }
+
+  @Override
+  public void periodic() {
+    // ---- 模式 ----
+    String mode = switch (Constants.kRobotMode) {
+      case kManual -> "手動";
+      case kAssist -> "輔助";
+      case kAuto -> "自動";
+      case kDisable -> "未選模式";
+    };
+    boolean enabled = RobotState.isEnabled();
+    Logger.recordOutput("Status/Mode", mode + (enabled ? "・啟用" : "・停用"));
+    Logger.recordOutput("Status/Enabled", enabled);
+
+    // ---- 射擊 ----
+    double target = TurretConstants.kMaxSpeedRadPerSec;
+    boolean ready = turret.isNearTargetSpeeds(target, target * 0.8);
+    double up = turret.getUpVelocityRadPerSec();
+    String shooter = ready ? "就緒"
+        : Math.abs(up) < kStoppedRadPerSec ? "停止"
+        : String.format(Locale.ROOT, "加速 %d%%", Math.round(100 * up / target));
+    Logger.recordOutput("Status/Shooter", shooter);
+    Logger.recordOutput("Status/ShooterReady", ready);
+    double pitch = turret.getPitchPositionRad();
+    Logger.recordOutput("Status/Pitch", String.format(Locale.ROOT, "%.3f rad / %.1f°", pitch, Math.toDegrees(pitch)));
+    Logger.recordOutput("Status/Shots", turret.getShotCount() + " 發");
+
+    // ---- 距離 ----
+    Logger.recordOutput("Status/Distance", String.format(Locale.ROOT, "%.2f m", RangeSensors.get().getTargetDistance()));
+    Logger.recordOutput("Status/TurretLidarDistance",
+        turretLidar.getDistanceMeters().isPresent()
+            ? String.format(Locale.ROOT, "%.2f m", turretLidar.getDistanceMeters().getAsDouble())
+            : "—");
+
+    // ---- 電池 ----
+    double battery = RobotController.getBatteryVoltage();
+    Logger.recordOutput("Status/Battery", String.format(Locale.ROOT, "%.1f V", battery));
+
+    // ---- 連線 + 警示 ----
+    List<String> problems = new ArrayList<>();
+    for (var e : connections.entrySet()) {
+      boolean ok = e.getValue().getAsBoolean();
+      Logger.recordOutput("Status/Conn/" + e.getKey(), ok);
+      if (!ok) problems.add(label(e.getKey()));
+    }
+    if (battery < kLowBatteryVolts) problems.add("電池低");
+    Logger.recordOutput("Status/Alert", problems.isEmpty() ? "全部正常" : "⚠ " + String.join("、", problems));
+  }
+}

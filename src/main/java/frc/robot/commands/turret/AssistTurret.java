@@ -9,6 +9,7 @@ import frc.FSLib.rangefinder.RangeSensors;
 import frc.FSLib.rangefinder.TargetRangeSensor;
 import frc.FSLib.util.Util;
 import frc.robot.subsystems.turret.Turret;
+import frc.robot.subsystems.turret.ShotTable;
 import frc.robot.subsystems.turret.TurretConstants;
 
 public class AssistTurret extends Command {
@@ -41,9 +42,7 @@ public class AssistTurret extends Command {
   public void execute() {
     double distance = rangeSensor.getTargetDistance();
     pitch = Util.clamp(
-      Math.PI / 2
-        - Math.atan2(targetHeightMeters - TurretConstants.kTurretToRobotCenter.getZ() + Math.pow(distance, 2) * 0.019358, distance)
-        + Util.mapAxis(adjestmentSupplier.getAsDouble(), -0.1, 0.1),
+      ShotTable.pitchRad(targetHeightMeters, distance) + Util.mapAxis(adjestmentSupplier.getAsDouble(), -0.1, 0.1),
       TurretConstants.kMinAngleRad,
       TurretConstants.kMaxAngleRad
     );

@@ -4,75 +4,82 @@ import static frc.robot.subsystems.storage.StorageConstants.*;
 
 import org.wpilib.driverstation.RobotState;
 import org.wpilib.hardware.discrete.DigitalOutput;
-import org.wpilib.hardware.discrete.PWM;
 import org.wpilib.command2.SubsystemBase;
 
 /**
- * Storage / Trigger 兩顆馬達，經 L298N 驅動。
+ * Storage（左、右兩顆）與 Trigger 共三顆馬達，經 L298N 驅動。
  *
- * <p>IN1~IN4 控制方向（DigitalOutput），ENA / ENB 用 PWM 的「高電位比例」控制速度。
- * roboRIO 時代用 {@code Spark} 類別：速度 1 會送出約 2000 μs 的脈衝，週期 5 ms，等於約 40% 出力。
- * SystemCore 的 PWM 預設週期是 20 ms，同樣的脈衝只剩約 10%，所以改成直接控制 {@link PWM}。
- * 週期設為 5 ms，速度 1 對應 {@link #kMaxPulseMicroseconds}，維持原本約 40% 的出力。
+ * <p>SystemCore 的 6 個 Smart I/O 全部當 DigitalOutput 接 L298N 的 IN 腳，只控制開／關與方向。
+ * L298N 的 ENA / ENB jumper 要插著（常開），所以馬達開啟時就是全速。
  */
 public class Stroage extends SubsystemBase {
-  /** PWM 週期（ms）。SystemCore 只支援 5、10、20。 */
-  private static final int kPwmPeriodMs = 5;
-  /** 速度 1 時的高電位時間（μs）。2000 / 5000 = 40%，與 roboRIO 時代相同。 */
-  private static final int kMaxPulseMicroseconds = 2000;
+  /** 一個 L298N 通道：forward 腳高 = 正轉，reverse 腳高 = 反轉，兩支都低 = 停止。 */
+  private static class Channel {
+    private final DigitalOutput forwardPin;
+    private final DigitalOutput reversePin;
+    private boolean forward = true;
 
-  private final DigitalOutput storageReverse = new DigitalOutput(kStorageForwardPort);
-  private final DigitalOutput storageForward = new DigitalOutput(kStorageReversePort);
-  private final DigitalOutput triggerReverse = new DigitalOutput(kTriggerForwardPort);
-  private final DigitalOutput triggerForward = new DigitalOutput(kTriggerReversePort);
+    Channel(int forwardPort, int reversePort) {
+      forwardPin = new DigitalOutput(forwardPort);
+      reversePin = new DigitalOutput(reversePort);
+      stop();
+    }
 
-  private final PWM storage = new PWM(kStorageSpeedPort);
-  private final PWM trigger = new PWM(kTriggerSpeedPort);
+    void setDirection(boolean forward) {
+      this.forward = forward;
+    }
 
-  public Stroage() {
-    storage.setOutputPeriod(kPwmPeriodMs);
-    trigger.setOutputPeriod(kPwmPeriodMs);
+    /** 速度只看是否為 0：非 0 就以目前方向全速轉，0 就停止。 */
+    void setSpeed(double speed) {
+      if (speed == 0) {
+        stop();
+        return;
+      }
+      // 先把另一支腳拉低，避免兩支腳同時為高
+      (forward ? reversePin : forwardPin).set(false);
+      (forward ? forwardPin : reversePin).set(true);
+    }
+
+    void stop() {
+      forwardPin.set(false);
+      reversePin.set(false);
+    }
   }
 
-  /** 把 0~1 的速度換算成 L298N EN 腳的高電位時間。 */
-  private static int toPulseMicroseconds(double speed) {
-    double clamped = Math.max(0, Math.min(1, Math.abs(speed)));
-    return (int) Math.round(clamped * kMaxPulseMicroseconds);
-  }
+  private final Channel storageLeft = new Channel(kStorageLeftForwardPort, kStorageLeftReversePort);
+  private final Channel storageRight = new Channel(kStorageRightForwardPort, kStorageRightReversePort);
+  private final Channel trigger = new Channel(kTriggerForwardPort, kTriggerReversePort);
 
   public void setStorageSpeed(double speed) {
-    storage.setPulseTimeMicroseconds(toPulseMicroseconds(speed));
+    storageLeft.setSpeed(speed);
+    storageRight.setSpeed(speed);
   }
 
   public void setStorageDirection(boolean forward) {
-    storageForward.set(forward);
-    storageReverse.set(!forward);
+    storageLeft.setDirection(forward);
+    storageRight.setDirection(forward);
   }
 
   public void disableStorage() {
-    storageForward.set(false);
-    storageReverse.set(false);
-    storage.setDisabled();
+    storageLeft.stop();
+    storageRight.stop();
   }
 
   public void setTriggerSpeed(double speed) {
-    trigger.setPulseTimeMicroseconds(toPulseMicroseconds(speed));
+    trigger.setSpeed(speed);
   }
 
   public void setTriggerDirection(boolean forward) {
-    triggerForward.set(forward);
-    triggerReverse.set(!forward);
+    trigger.setDirection(forward);
   }
 
   public void disableTrigger() {
-    triggerForward.set(false);
-    triggerReverse.set(false);
-    trigger.setDisabled();
+    trigger.stop();
   }
 
   @Override
   public void periodic() {
-    // 直接用 PWM 時，機器人 disable 後不一定會自動停止輸出，所以這裡自己確保停止
+    // 機器人 disable 時確保所有 IN 腳都是低電位
     if (RobotState.isDisabled()) {
       disableStorage();
       disableTrigger();
