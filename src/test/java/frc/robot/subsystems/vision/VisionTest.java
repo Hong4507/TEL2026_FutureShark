@@ -76,4 +76,122 @@ class VisionTest {
     assertEquals(0.05, Vision.nearest(cols, 0.2, 0.3).getAsDouble(), kEps);
     assertTrue(Vision.nearest(cols, 0.45, 0.3).isEmpty());
   }
+
+  // ---------- 邊界情況 ----------
+
+  private static void assertNoColumn(List<Double> cols) {
+    for (Column c : Column.values()) {
+      assertTrue(Vision.columnError(cols, c).isEmpty(), c + " 應該分辨不出來，實際 " + Vision.columnError(cols, c));
+    }
+  }
+
+  @Test
+  void nothingSeen() {
+    List<Double> cols = Vision.columnErrors(List.of(), kDistance);
+    assertTrue(cols.isEmpty());
+    assertNoColumn(cols);
+    assertTrue(Vision.nearest(cols, 0, Double.POSITIVE_INFINITY).isEmpty());
+  }
+
+  @Test
+  void singleColumnIsAmbiguous() {
+    List<Double> cols = Vision.columnErrors(column(0.3), kDistance);
+    assertEquals(1, cols.size());
+    assertNoColumn(cols);
+  }
+
+  @Test
+  void partialColumnAtImageEdgeStillClusters() {
+    // 畫面邊緣只露出一個洞：仍然算一欄，不會拆成兩欄
+    List<Detection> d = new ArrayList<>();
+    d.addAll(column(0.9));
+    d.addAll(column(0.0));
+    d.add(holeAt(-0.9, kClassHole));
+    List<Double> cols = Vision.columnErrors(d, kDistance);
+    assertEquals(3, cols.size());
+    assertEquals(-0.9, Vision.columnError(cols, Column.RIGHT).getAsDouble(), kEps);
+  }
+
+  @Test
+  void noisyBoxesInOneColumnStayOneColumn() {
+    // 同一欄的框左右各差 ±8 cm（框不準），不能被拆成兩欄
+    List<Detection> d = new ArrayList<>();
+    for (double e : new double[] {0.82, 0.98, 0.9}) d.add(holeAt(e, kClassHole));
+    d.addAll(column(0.0));
+    d.addAll(column(-0.9));
+    List<Double> cols = Vision.columnErrors(d, kDistance);
+    assertEquals(3, cols.size());
+    assertEquals(0.9, Vision.columnError(cols, Column.LEFT).getAsDouble(), 0.01);
+  }
+
+  @Test
+  void falseBoxNextToTwoColumnsIsNotTakenAsGrid() {
+    // 看到中、右兩欄，加上一個誤判的框（燈、隊服）在中欄前方 0.45 m。
+    // 三群但間距不像九宮格，不能把假框當成左欄，也不能把中欄當成別欄。
+    List<Detection> d = new ArrayList<>();
+    d.addAll(column(0.0));
+    d.addAll(column(-0.9));
+    d.add(holeAt(0.45, kClassHole));
+    List<Double> cols = Vision.columnErrors(d, kDistance);
+    assertEquals(3, cols.size());
+    assertNoColumn(cols);
+  }
+
+  @Test
+  void falseBoxFarAheadDoesNotBreakFullGrid() {
+    // 三欄都看到，再加一個遠處的假框：仍然要找得到正確的三欄
+    List<Detection> d = new ArrayList<>();
+    d.addAll(column(0.9));
+    d.addAll(column(0.0));
+    d.addAll(column(-0.9));
+    d.add(holeAt(2.4, kClassHole));
+    List<Double> cols = Vision.columnErrors(d, kDistance);
+    assertEquals(4, cols.size());
+    assertEquals(0.9, Vision.columnError(cols, Column.LEFT).getAsDouble(), kEps);
+    assertEquals(0.0, Vision.columnError(cols, Column.MID).getAsDouble(), kEps);
+    assertEquals(-0.9, Vision.columnError(cols, Column.RIGHT).getAsDouble(), kEps);
+  }
+
+  @Test
+  void falseBoxBetweenColumnsDoesNotBreakFullGrid() {
+    List<Detection> d = new ArrayList<>();
+    d.addAll(column(0.9));
+    d.addAll(column(0.0));
+    d.addAll(column(-0.9));
+    d.add(holeAt(-0.45, kClassHole));
+    List<Double> cols = Vision.columnErrors(d, kDistance);
+    assertEquals(4, cols.size());
+    assertEquals(0.0, Vision.columnError(cols, Column.MID).getAsDouble(), kEps);
+    assertEquals(-0.9, Vision.columnError(cols, Column.RIGHT).getAsDouble(), kEps);
+  }
+
+  @Test
+  void falseBoxFarFromSingleColumnIsNotTakenAsOuterPair() {
+    // 只看到中欄，加上 2.5 m 外的假框：間距不像「左、右兩欄」（1.8 m），不能配成一對
+    List<Detection> d = new ArrayList<>(column(0.0));
+    d.add(holeAt(2.5, kClassHole));
+    assertNoColumn(Vision.columnErrors(d, kDistance));
+  }
+
+  @Test
+  void distanceErrorStillFindsGrid() {
+    // TF-Luna 讀成 2.0 m（實際 2.5 m）：欄距看起來縮成 0.72 m，仍然要認得出三欄
+    List<Detection> d = new ArrayList<>();
+    d.addAll(column(0.9));
+    d.addAll(column(0.0));
+    d.addAll(column(-0.9));
+    List<Double> cols = Vision.columnErrors(d, 2.0);
+    assertEquals(3, cols.size());
+    assertTrue(Vision.columnError(cols, Column.MID).isPresent());
+  }
+
+  @Test
+  void outerPairWithDistanceErrorStillInfersMid() {
+    // 只看到左右兩欄、距離讀小 20%：間距 1.44 m，仍然認得出是左右兩欄
+    List<Detection> d = new ArrayList<>();
+    d.addAll(column(0.9));
+    d.addAll(column(-0.9));
+    List<Double> cols = Vision.columnErrors(d, 2.0);
+    assertTrue(Vision.columnError(cols, Column.MID).isPresent());
+  }
 }

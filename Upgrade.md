@@ -20,14 +20,34 @@ SystemCore 只有 **6 個 Smart I/O 埠（0–5）**（已從 HAL 原始碼確�
 |---|---|---|---|
 | Storage 方向控制 | DIO 0、1、2、3 | **Smart I/O 0、1、2、3** | `subsystems/storage/StorageConstants.java` |
 | Storage / Trigger 馬達（PWM Spark） | PWM 8、9 | **Smart I/O 4、5** | `subsystems/storage/StorageConstants.java` |
-| FlySky 遙控接收機 | DIO 4、5、6、7、8、9（PWM 訊號） | **接到 Jetson（iBus），經 NetworkTables 傳給機器人** | `controller/FlySkyController.java` |
+| FlySky 遙控接收機 | DIO 4、5、6、7、8、9（PWM 訊號） | **iBus 經 USB 轉 TTL 模組接 SystemCore USB**（2026-11-13 起；Jetson + NT 保留為備援） | `controller/FlySkyController.java`、`controller/IBusSerialReader.java` |
 | 兩顆 TF-Luna 測距 | 協處理器，經 NetworkTables | **直接接 SystemCore I2C 0（左）、I2C 1（右）** | `FSLib/rangefinder/RangeSensorConstants.java` |
 
 腳位對照：DIO 0→0、DIO 1→1、DIO 2→2、DIO 3→3、PWM 8→4、PWM 9→5。**實體接線也要跟著改。**
 
 ---
 
-## FlySky 遙控器：Jetson + NetworkTables
+## FlySky 遙控器：USB 轉 TTL 直接接 SystemCore（2026-11-13）
+
+```
+FlySky 接收機 --iBus(UART 115200)--> USB-TTL 模組 --USB--> SystemCore（/dev/ttyUSB0）
+```
+
+- 接線：接收機 i-BUS 訊號腳 → USB-TTL **RX**；GND 共地；接收機 5V 接 USB-TTL 的 5V。USB-TTL 的 TX 不用接。
+- **WPILib 2027 alpha-8 的 `SerialPort` 在 SystemCore 上沒實作**（HAL 的 `systemcore/SerialPort.cpp` 全部回傳 `HAL_HANDLE_ERROR`），
+  所以 `IBusSerialReader` 用 `stty -F <port> 115200 cs8 -cstopb -parenb raw -echo clocal ... min 1 time 0` 設定序列埠，
+  再用 `FileInputStream` 在背景執行緒直接讀。依序嘗試 `FlySkyController.kSerialPorts`（`/dev/ttyUSB0`、`/dev/ttyUSB1`、`/dev/ttyACM0`）。
+- USB 被拔掉或讀取失敗會每 1 秒重新開啟；同樣的錯誤只印一次到 console（`[FlySky] ...`）。
+- **來源優先順序**：USB-TTL 0.1 秒內有正確封包 → 用 USB-TTL；否則改讀 Jetson 的 NT（下方舊架構）；兩個都沒有 → 全部歸零（failsafe 不變）。
+  模擬器（`RobotBase.isReal() == false`）不開序列埠，只讀 NT，所以 `sim_smoke_test.py` 照常可用。
+- **不要兩邊同時接同一台接收機的訊號**也沒關係（USB-TTL 優先），但換回 USB-TTL 後 Jetson 的 `flysky` 服務可以停掉：`sudo systemctl disable --now flysky`。
+- Log（AdvantageKit）：`FlySky/Source`（`kSerial`／`kNetworkTables`／`kNone`）、`FlySky/ChannelsUs`、
+  `FlySky/Serial/Port`、`FlySky/Serial/Frames`、`FlySky/Serial/BadFrames`（一直增加 → 接觸不良或鮑率錯）。
+- ⚠️ 實機待確認：`stty` 存在且機器人程式的使用者有 `/dev/ttyUSB0` 的讀取權限（沒有的話 console 會印 `stty 失敗（權限不足？）`，
+  用 `ls -l /dev/ttyUSB0` 看群組，把執行機器人程式的使用者加進 `dialout` 群組）。
+- `IBusParserTest`：單一封包、垃圾資料後重新同步、零碎讀取、checksum 錯誤。
+
+## FlySky 遙控器（備援）：Jetson + NetworkTables
 
 ### 架構
 
@@ -224,6 +244,11 @@ sourceSets {
 
 ### `robot/controller/CommandFlySkyController.java`
 - 自訂建構子的參數改為 iBus 通道 index
+- 2026-11-13：建構時把 `FlySkyController.logTelemetry()` 綁到預設 EventLoop，每個 loop 記一次 FlySky log
+
+### `robot/controller/IBusSerialReader.java`（新增，2026-11-13）
+- 在 SystemCore 上直接讀 USB-TTL 的 i-BUS，詳見「FlySky 遙控器：USB 轉 TTL」章節
+- `FlySkyController`：實機建立 `IBusSerialReader`；新增 `getSource()`、`getChannelsMicroseconds()`、`logTelemetry()`；`isConnected()` 改為任一來源有資料即可
 
 ### `jetson_tools/flysky_nt_publisher.py`（Jetson 端）
 - 修正：`/FlySky/channels` 原本發布已正規化的 -1~1，與機器人端（期望 μs，自己再正規化）不符，
@@ -433,11 +458,41 @@ YOLO 只負責**水平對準**九宮格的某一欄；牆面角度仍由 TF-Luna
   - 還沒有 `camera_calib.yaml`，服務先拿掉 `--calib`，用 `--hfov 70` 估角度（對準時目標在畫面中央，影響很小）。有校正檔後再加回。
   - 更新程式：`scp` 到 Jetson 後 `sudo systemctl restart vision`；看 log：`journalctl -u vision -f`。
 
+## 誤判防護與 LaserAlign 安全機制（2026-11-12）
+
+- `Vision.columnError`：原本「看到三群就當成左中右、兩群相距夠遠就當成左右」，一個誤判的框（燈、隊服）就會讓 VisionAlign 對到空牆。改成只接受**間距像九宮格**的組合：
+  - 三欄：兩個間距要相等（差 ≤ 0.18 m），且是欄距 0.9 m 的 0.6~1.6 倍（TF-Luna 讀錯或用預設距離時欄距會縮放）。看到四群以上時挑最像的三群，多的當雜訊。
+  - 只看到兩群：間距要在 1.35~2.25 m 才當成左右兩欄。三群以上又湊不出九宮格時不猜，回傳 empty（VisionAlign 1 秒後放棄，比對錯好）。
+  - `VisionTest` 新增 10 個邊界測試（空畫面、單欄、邊緣半欄、框不準、各種假框、距離誤差），修改前有 4 個失敗。
+- `LaserAlign`：原本沒有逾時；`kYawSign` 或左右 TF-Luna 接反時會一直轉到 TF-Luna 失去牆面。新增：
+  - 2 秒逾時。
+  - 誤差比開始時多 0.15 rad（≈ 8.6°）就停，並記錄 `LaserAlign/WrongDirection` = true → 實機看到就把 `kYawSign` 改成 -1。
+  - `LaserAlign/ErrorRad` 記錄。
+- `DualTFLunaRangeSensor.yawRad(left, right)`：偏航角公式抽成靜態函式；`RangeSensors.setForTesting()` 讓測試換假感測器。
+- `LaserAlignSimTest`（12 個）：用模擬位置算兩顆 TF-Luna 的距離。方向對時 ±30° 內 1.1 s 轉正（誤差 2.7°）；方向反時 0.5 s 停、只多歪約 11°。結論：`kYawSign = +1` 對應「程式的 Left 是車尾那顆」（TF-Luna 朝機器人右側時）。
+- 檢查清單新增 1.6 `kBaselineMeters`、1.7 目標距離校正（`kWallToTargetMeters`、`kSensorOffsetMeters`）。
+
+## 序列埠／攝影機改用固定路徑（2026-11-14）
+
+- `FlySkyController.kSerialPorts`：改成 CP2102 的 `/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0`，找不到才退回 `/dev/ttyUSB0`。移除 `/dev/ttyACM0`，因為那是 **Limelight**，原本 USB-TTL 沒認到時會誤開它。實機 hexdump 確認 i-BUS 封包與 checksum 正常；程式用 `systemcore` 使用者執行，已在 `dialout` 群組。
+- `vision.service`：加上 `--device /dev/v4l/by-id/usb-Arducam_..._OV9281_USB_Camera_UC762-video-index0`。Arducam OV9281 在 USB 斷線重連後從 video0 跳到 video1，服務就打不開攝影機。
+- `vision_nt_publisher.py`：攝影機斷線時原本會卡在 `LatestFrame.get()` 永遠等新畫面，程式沒結束，`Restart=always` 不會觸發。改成 2 秒沒新畫面就丟例外結束（第一張多等 3 秒）；打不開攝影機改成結束碼 1。`vision.service` 加 `StartLimitIntervalSec=0`，避免連續失敗後 systemd 放棄重啟。
+- 同日 OV9281 換到別的 USB 孔仍反覆斷線，改用 Generalplus「WEB CAM」（1b3f:1147，彩色）；`vision.service` 的 `--device` 改成 `/dev/v4l/by-id/usb-WCM_USB_WEB_CAM-video-index0`。視角未知，仍用預設 `--hfov 70`，待量測。
+- 便宜 webcam 設定：`camera_check.lock_camera()` 關自動對焦，開機時讓自動曝光／白平衡調 1.5 秒後鎖住（`--exposure`、`--wb`：`auto`／`lock`／數字，不支援時只警告）。`vision_nt_publisher.py` 與 `camera_check.py` 都加了這兩個參數；`vision.service` 改用 640x480。實機 `v4l2-ctl -l` 顯示 jsing wb1 只有 brightness、power_line_frequency，沒有曝光／白平衡控制，所以 service 用 `--exposure auto --wb auto`。實測只有約 15 fps，原因待確認（暗處自動曝光拉長，或攝影機本身上限）。
+- `VisionIOSim.frameRateHz` 改成可調（預設 30），`VisionAlignSimTest.fpsSweep`（`VA_FPS=1`）比較幀率與延遲：30 fps／60 ms、15 fps／150 ms、10 fps／200 ms 的落點誤差都在 1.4 cm 內、時間差 < 0.2 s，VisionAlign 靠里程計補幀間移動，15 fps 夠用。模擬沒有模擬動態模糊。
+- 同日又換回 Arducam OV9281：`vision.service` 改回 OV9281 的 by-id 路徑、預設 1280x720、`--exposure lock --wb auto`（webcam 的參數留在註解）。OV9281 是**黑白**，原本的紅色像素亮燈判斷永遠是 0 → `lit_score` 偵測到三通道幾乎相同時改數亮度 ≥ 200 的像素（`MONO_LIT_MIN`）。⚠️ 本機沒有 OpenCV，未實測；`LitThreshold` 要在有燈條的場地重新調。
+- OV9281 換線後仍約每 10 秒 USB 斷線一次：
+  - `vision_nt_publisher.LatestFrame`：讀不到畫面 0.3 秒就在程式內重開攝影機（套用已鎖定的曝光，不再等 1.5 秒），不必整個重啟、重載模型；10 秒都重連不上才結束交給 systemd。`open_camera` 設 `CAP_PROP_READ_TIMEOUT_MSEC` 500（OpenCV 有支援時），避免 read() 卡 10 秒。假攝影機測試：斷線後 0.7 秒恢復。
+  - `VisionAlign`：`kLostTimeoutSec` 0.5 → 1.5、`kAcquireTimeoutSec` 1.0 → 2.0。看丟期間靠里程計追，到位就停著等。
+  - `VisionIOSim.dropoutFrom/Until` 模擬斷線；`VisionAlignSimTest.survivesCameraDropout`：斷線 1.2 秒發生在開始後 0/0.3/0.8/1.5 秒，改之前 3/4 失敗（落點差 0.60/0.24/0.08 m），改之後全過（≤ 1.7 cm，時間 2.1~3.5 s）。全部測試通過。
+- Limelight 2 當網路攝影機（試用）：`open_camera` 遇到 `http://`、`https://`、`rtsp://` 改用 FFmpeg 讀串流，曝光／白平衡交給 Limelight 網頁；斷線重連同樣適用。`vision.service` 只加註解範例（`--device http://10.71.30.12:5802/ --hfov 59.6`），實測串流在 port **5802**、640x480、15 fps 後，`vision.service` 改用 Limelight 2（`--device http://10.71.30.12:5802/ --hfov 59.6`），OV9281 與 webcam 參數留在註解。Limelight 預設 IP 10.TE.AM.11 會和 Jetson 衝突，要先改成 .12；需要網路交換器連 SystemCore、Jetson、Limelight。規則要求自動期用 AI 辨識，所以 YOLO 仍在 Jetson 跑。
+- ⚠️ 實機 dmesg 看到 OV9281 反覆 `USB disconnect`／`error -71`（接在 Jetson 的 USB 2.0 Hub 上），這是硬體連線問題，固定路徑救不了：要換線、直插 Jetson 本體 USB 孔。
+
 ---
 
 ## 4. 其他待確認事項
 
-1. **I/O 接線**：Storage 照「I/O 埠重新分配」改接；FlySky 接收機接到 Jetson（✅ 已確認 NT 傳輸、通道對應與搖桿軸方向，2026-11-07）。
+1. **I/O 接線**：Storage 照「I/O 埠重新分配」改接；FlySky 接收機接到 Jetson（✅ 已確認 NT 傳輸、通道對應與搖桿軸方向，2026-11-07）。2026-11-13 改為 USB-TTL 直接接 SystemCore，⚠️ 待實機確認 `FlySky/Source` = `kSerial`。
 2. **TF-Luna I2C**：第 5 腳接 GND（I2C 模式）；左接 I2C 0、右接 I2C 1。在 AdvantageScope 確認 `RangeSensor/TFLuna/LeftConnected`、`RightConnected` 為 true，並確認左右沒有接反（`TiltRad` 正負）。
 3. **CAN 埠**：✅ `Constants.kCANPort` 與實際接線一致（2026-11-07）。
 4. **底盤 PID**：REVLib 單位換算改在程式中處理，PID 增益已等比例縮放，請在實機上確認速度控制正常。

@@ -141,13 +141,21 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
     return distance;
   }
 
+  /**
+   * 左右兩顆的距離 → 偏航角（rad，π/2 = 正對牆面）。純計算，模擬測試也用這個。
+   * 方向由 {@link RangeSensorConstants#kYawSign} 決定。
+   */
+  public static double yawRad(double leftMeters, double rightMeters) {
+    return Math.PI / 2 + kYawSign * Math.atan2(rightMeters - leftMeters, kBaselineMeters);
+  }
+
   @Override
   public Angle getYaw() {
     Reading reading = read();
     if (!reading.bothValid()) {
       return null;
     }
-    double yaw = Math.PI / 2 + kYawSign * reading.tiltRad();
+    double yaw = yawRad(reading.left(), reading.right());
     Logger.recordOutput("RangeSensor/YawRad", yaw);
     return Radians.of(yaw);
   }

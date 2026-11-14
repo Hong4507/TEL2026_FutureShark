@@ -17,4 +17,9 @@ public final class RangeSensors {
     }
     return instance;
   }
+
+  /** 測試用：換成假的感測器（例如依模擬位置算距離）。傳 null 恢復預設。要在建立 command 之前呼叫。 */
+  public static synchronized void setForTesting(TargetRangeSensor sensor) {
+    instance = sensor;
+  }
 }

@@ -9,7 +9,7 @@ NT 表 Vision（格式必須和 robot/subsystems/vision/VisionConstants.java 一
   latencyMs  double    從拿到畫面到發布的時間
   fps        double    實際處理幀率
 
-亮燈判斷不靠 YOLO：YOLO 只找出加分洞（bonus），再看洞外一圈有多少紅色像素。
+亮燈判斷不靠 YOLO：YOLO 只找出加分洞（bonus），再看洞外一圈有多少紅色像素（黑白攝影機改看亮像素）。
 這樣不需要亮燈的訓練資料，門檻在機器人端 /Tuning/Vision/LitThreshold 調整。
 
 用法：
@@ -30,7 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cv2
 import numpy as np
 
-from camera_check import open_camera
+from camera_check import add_lock_args, is_stream, lock_camera, open_camera
 
 CLASS_HOLE = 0
 CLASS_BONUS = 1
@@ -38,32 +38,69 @@ STRIDE = 6
 
 
 class LatestFrame:
-    """背景執行緒一直讀攝影機，只保留最新一張，避免緩衝區造成延遲。"""
+    """背景執行緒一直讀攝影機，只保留最新一張，避免緩衝區造成延遲。
 
-    def __init__(self, cap):
+    USB 斷線時（OV9281 實測約每 10 秒一次，約 0.5~1 秒後重新出現）在這裡直接重開攝影機，
+    不必整個程式重啟、重新載入模型（那要 5~10 秒）。
+    """
+
+    def __init__(self, cap, reopen=None, timeout_s=10.0, reconnect_after_s=0.3):
         self.cap = cap
+        self.reopen = reopen
+        self.timeout_s = timeout_s
+        self.reconnect_after_s = reconnect_after_s
         self.lock = threading.Lock()
         self.frame = None
         self.stamp = 0.0
         self.seq = 0
+        self.reconnects = 0
         self.running = True
         threading.Thread(target=self._run, daemon=True).start()
 
     def _run(self):
+        last_ok = time.monotonic()
         while self.running:
-            ok, frame = self.cap.read()
-            if not ok:
+            ok, frame = self.cap.read() if self.cap is not None else (False, None)
+            now = time.monotonic()
+            if ok:
+                last_ok = now
+                with self.lock:
+                    self.frame, self.stamp, self.seq = frame, now, self.seq + 1
+                continue
+            if self.reopen is None or now - last_ok < self.reconnect_after_s:
                 time.sleep(0.01)
                 continue
-            with self.lock:
-                self.frame, self.stamp, self.seq = frame, time.monotonic(), self.seq + 1
+            if self.cap is not None:
+                self.cap.release()
+                self.cap = None
+            cap = self.reopen()
+            if cap is None:
+                time.sleep(0.2)  # 裝置還沒重新出現
+                continue
+            self.cap = cap
+            self.reconnects += 1
+            print(f"⚠️ 攝影機斷線 {now - last_ok:.1f} 秒後重新連上（第 {self.reconnects} 次）")
+            last_ok = time.monotonic()
+
+    def release(self):
+        self.running = False
+        if self.cap is not None:
+            self.cap.release()
 
     def get(self, last_seq):
-        """等到有比 last_seq 新的畫面，回傳 (frame, stamp, seq)。"""
+        """等到有比 last_seq 新的畫面，回傳 (frame, stamp, seq)。
+
+        超過 timeout_s 一直重連不上就丟例外讓程式結束，交給 systemd 的 Restart=always；
+        否則程式會卡在這裡、服務看起來還活著。
+        """
+        start = time.monotonic()
         while True:
             with self.lock:
                 if self.frame is not None and self.seq != last_seq:
                     return self.frame, self.stamp, self.seq
+            limit = self.timeout_s if self.frame is not None else self.timeout_s + 3  # 第一張多等一點
+            if time.monotonic() - start > limit:
+                raise RuntimeError(f"❌ 攝影機 {limit:.0f} 秒沒有新畫面、重連也失敗，結束讓 systemd 重啟")
             time.sleep(0.001)
 
 
@@ -97,8 +134,19 @@ class Undistorter:
         return cv2.undistortPoints(pts, self.K, self.dist).reshape(-1, 2)
 
 
+# 黑白攝影機（OV9281）看不到紅色：畫面三個色彩通道幾乎一樣時，改數「很亮」的像素。
+# 九宮格板子是黑的，洞外一圈亮起來就是燈條；門檻一樣在機器人端 /Tuning/Vision/LitThreshold 調。
+MONO_CHANNEL_DIFF = 3.0
+MONO_LIT_MIN = 200
+
+
+def is_mono(img):
+    s = img[::4, ::4].astype(np.int16)
+    return np.abs(s[..., 0] - s[..., 1]).mean() < MONO_CHANNEL_DIFF and np.abs(s[..., 1] - s[..., 2]).mean() < MONO_CHANNEL_DIFF
+
+
 def lit_score(frame, box):
-    """加分洞外圈（燈條位置附近）的紅色像素比例。"""
+    """加分洞外圈（燈條位置附近）的紅色像素比例；黑白畫面改用亮像素比例。"""
     x0, y0, x1, y1 = box
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
     ax, ay = (x1 - x0) / 2, (y1 - y0) / 2
@@ -114,8 +162,11 @@ def lit_score(frame, box):
     center = (int(cx - X0), int(cy - Y0))
     cv2.ellipse(ring, center, (int(rx), int(ry)), 0, 0, 360, 255, -1)
     cv2.ellipse(ring, center, (int(ax * 1.25), int(ay * 1.25)), 0, 0, 360, 0, -1)
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    red = (cv2.inRange(hsv, (0, 120, 120), (10, 255, 255)) | cv2.inRange(hsv, (170, 120, 120), (180, 255, 255)))
+    if is_mono(roi):
+        red = cv2.inRange(cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY), MONO_LIT_MIN, 255)
+    else:
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        red = (cv2.inRange(hsv, (0, 120, 120), (10, 255, 255)) | cv2.inRange(hsv, (170, 120, 120), (180, 255, 255)))
     total = cv2.countNonZero(ring)
     return cv2.countNonZero(red & ring) / total if total else 0.0
 
@@ -186,7 +237,7 @@ def main():
     parser.add_argument("--model", required=True, help="best.engine（Jetson 上轉好的 TensorRT）或 best.pt")
     parser.add_argument("--calib", default=None, help="calibrate.py 產生的 camera_calib.yaml")
     parser.add_argument("--hfov", type=float, default=70.0, help="沒有校正檔時用的水平視角（度）")
-    parser.add_argument("--device", default="0")
+    parser.add_argument("--device", default="0", help="USB 攝影機路徑，或網路串流網址（Limelight：http://10.71.30.12:5802/）")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--fps", type=int, default=30)
@@ -198,6 +249,7 @@ def main():
     parser.add_argument("--stream-port", type=int, default=1181)
     parser.add_argument("--save-dir", default=None, help="定時存原始畫面的資料夾（收訓練資料用）")
     parser.add_argument("--save-every", type=float, default=2.0, help="幾秒存一張")
+    add_lock_args(parser)
     args = parser.parse_args()
 
     from ultralytics import YOLO
@@ -206,13 +258,29 @@ def main():
     cap = open_camera(args.device, args.width, args.height, args.fps)
     if not cap.isOpened():
         print("❌ 打不開攝影機")
-        return
+        raise SystemExit(1)  # 非 0 結束碼，systemd 才會記成失敗並重啟
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     print(f"攝影機：{width}x{height}")
+    print(f"攝影機設定：{lock_camera(cap, args.exposure, args.wb)}")  # 要在 LatestFrame 開始讀之前
+
+    # 重連時直接套用剛鎖好的數值，不再等 1.5 秒自動調整
+    fixed_exposure = "auto" if args.exposure == "auto" else str(cap.get(cv2.CAP_PROP_EXPOSURE))
+    fixed_wb = "auto" if args.wb == "auto" else str(cap.get(cv2.CAP_PROP_WB_TEMPERATURE))
+
+    def reopen():
+        if not is_stream(args.device) and not os.path.exists(args.device) and not str(args.device).isdigit():
+            return None
+        c = open_camera(args.device, args.width, args.height, args.fps)
+        if not c.isOpened():
+            c.release()
+            return None
+        c.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        lock_camera(c, fixed_exposure, fixed_wb, settle_s=0)
+        return c
     undistort = Undistorter(args.calib, width, height, args.hfov)
-    camera = LatestFrame(cap)
+    camera = LatestFrame(cap, reopen)
     stream = MjpegServer(args.stream_port) if args.stream_port else None
 
     pubs = None
@@ -300,8 +368,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        camera.running = False
-        cap.release()
+        camera.release()
 
 
 if __name__ == "__main__":

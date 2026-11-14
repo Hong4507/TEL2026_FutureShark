@@ -120,19 +120,63 @@ public class Vision extends SubsystemBase {
     return columnError(getColumnErrors(distanceMeters), column);
   }
 
-  /** {@link #getColumnError(Column, double)} 的純計算版本：輸入已排序（前到後）的欄位位置。 */
+  /**
+   * {@link #getColumnError(Column, double)} 的純計算版本：輸入已排序（前到後）的欄位位置。
+   *
+   * <p>只接受間距像九宮格的組合，避免把誤判的框（燈、隊服）當成一欄：
+   * <ul>
+   *   <li>三欄：兩個間距要差不多，而且是欄距的 {@link #kMinScale}~{@link #kMaxScale} 倍
+   *       （TF-Luna 讀錯或用預設距離時，欄距看起來會縮放）。看到四群以上時，挑最像九宮格的三群，多的當雜訊。</li>
+   *   <li>只看到兩群：間距要像「左、右兩欄」（{@link #kMinPairGapMeters}~{@link #kMaxPairGapMeters}），
+   *       中欄取中點。下限比較嚴，免得把相鄰兩欄當成左右兩欄。</li>
+   * </ul>
+   */
   public static OptionalDouble columnError(List<Double> cols, Column column) {
-    if (cols.size() == 3) {
-      return OptionalDouble.of(cols.get(column.ordinal()));
+    double[] grid = findGrid(cols);
+    return grid == null ? OptionalDouble.empty() : OptionalDouble.of(grid[column.ordinal()]);
+  }
+
+  /** 三欄時，欄距看起來可以是實際的幾倍。兩個間距必須相等，所以範圍放寬也不容易誤認。 */
+  static final double kMinScale = 0.6;
+  static final double kMaxScale = 1.6;
+  /** 只看到兩群時，當成「左、右兩欄」的間距範圍（實際 1.8 m）。 */
+  static final double kMinPairGapMeters = 1.5 * kColumnSpacingMeters;
+  static final double kMaxPairGapMeters = 2.5 * kColumnSpacingMeters;
+  /** 三欄的兩個間距最多差多少（同一張畫面兩個間距的縮放相同，只有框的誤差）。 */
+  static final double kMaxGapMismatchMeters = 0.2 * kColumnSpacingMeters;
+
+  /** 回傳 {LEFT, MID, RIGHT} 的位置；認不出九宮格就回傳 null。 */
+  private static double[] findGrid(List<Double> cols) {
+    double minGap = kMinScale * kColumnSpacingMeters;
+    double maxGap = kMaxScale * kColumnSpacingMeters;
+
+    double[] best = null;
+    double bestMismatch = kMaxGapMismatchMeters;
+    for (int i = 0; i < cols.size(); i++) {
+      for (int j = i + 1; j < cols.size(); j++) {
+        double g1 = cols.get(i) - cols.get(j);
+        if (g1 < minGap || g1 > maxGap) continue;
+        for (int k = j + 1; k < cols.size(); k++) {
+          double g2 = cols.get(j) - cols.get(k);
+          if (g2 < minGap || g2 > maxGap) continue;
+          double mismatch = Math.abs(g1 - g2);
+          if (mismatch <= bestMismatch) {
+            bestMismatch = mismatch;
+            best = new double[] {cols.get(i), cols.get(j), cols.get(k)};
+          }
+        }
+      }
     }
-    if (cols.size() == 2 && cols.get(0) - cols.get(1) > 1.5 * kColumnSpacingMeters) {
-      return switch (column) {
-        case LEFT -> OptionalDouble.of(cols.get(0));
-        case RIGHT -> OptionalDouble.of(cols.get(1));
-        case MID -> OptionalDouble.of((cols.get(0) + cols.get(1)) / 2);
-      };
+    if (best != null) return best;
+
+    // 只看到左右兩欄、中欄被擋住。多於兩群又湊不出三欄時無法判斷，不猜。
+    if (cols.size() == 2) {
+      double gap = cols.get(0) - cols.get(1);
+      if (gap > kMinPairGapMeters && gap <= kMaxPairGapMeters) {
+        return new double[] {cols.get(0), (cols.get(0) + cols.get(1)) / 2, cols.get(1)};
+      }
     }
-    return OptionalDouble.empty();
+    return null;
   }
 
   /** 亮燈的加分洞那一欄相對射球點的位置；沒有亮燈的加分洞就回傳 empty。 */

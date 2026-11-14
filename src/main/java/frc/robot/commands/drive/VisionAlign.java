@@ -43,8 +43,10 @@ public class VisionAlign extends Command {
 
   private static final int kSettleFrames = 3;
   private static final double kTrackGateMeters = VisionConstants.kColumnSpacingMeters / 3;
-  private static final double kAcquireTimeoutSec = 1.0;
-  private static final double kLostTimeoutSec = 0.5;
+  // 要撐過攝影機 USB 斷線重連（OV9281 實機約每 10 秒斷一次、約 1 秒恢復）。
+  // 看丟時靠里程計繼續追 lockedError，到位就停著等下一張，所以多等不會亂跑。
+  private static final double kAcquireTimeoutSec = 2.0;
+  private static final double kLostTimeoutSec = 1.5;
   private static final double kTotalTimeoutSec = 5.0;
 
   private final Drive drive;

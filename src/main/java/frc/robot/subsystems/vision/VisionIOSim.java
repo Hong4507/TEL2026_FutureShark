@@ -23,7 +23,6 @@ import org.wpilib.system.Timer;
  */
 public class VisionIOSim implements VisionIO {
   private static final double kHorizontalFovRad = Math.toRadians(70);
-  private static final double kFrameRateHz = 30;
   private static final double kHoleDiameterMeters = 0.40;
   private static final double kBonusDiameterMeters = 0.20;
   private static final double kNoiseRad = Math.toRadians(0.15);
@@ -33,6 +32,16 @@ public class VisionIOSim implements VisionIO {
 
   /** 所有 VisionIOSim 共用的延遲，測試可以改。 */
   public static double latencySeconds = kDefaultLatencySeconds;
+
+  /** 預設幀率。jsing wb1 webcam 實測約 15 fps（2026-11-14）。 */
+  public static final double kDefaultFrameRateHz = 30;
+
+  /** 所有 VisionIOSim 共用的幀率，測試可以改。 */
+  public static double frameRateHz = kDefaultFrameRateHz;
+
+  /** 模擬攝影機 USB 斷線：這段時間（Timer.getTimestamp()）內沒有新畫面。預設 NaN = 不斷線。 */
+  public static double dropoutFrom = Double.NaN;
+  public static double dropoutUntil = Double.NaN;
 
   private final Supplier<Pose2d> poseSupplier;
   /** {時間, pose} 歷史，用來取 latencySeconds 之前的 pose。 */
@@ -63,7 +72,8 @@ public class VisionIOSim implements VisionIO {
     while (poseHistory.size() > 1 && (double) poseHistory.peekFirst()[0] < now - latencySeconds - 0.5) {
       poseHistory.removeFirst();
     }
-    inputs.newFrame = now - lastFrameTime >= 1.0 / kFrameRateHz;
+    boolean dropped = now >= dropoutFrom && now < dropoutUntil;
+    inputs.newFrame = !dropped && now - lastFrameTime >= 1.0 / frameRateHz;
     if (inputs.newFrame) {
       lastFrameTime = now;
       heartbeat++;
@@ -73,7 +83,7 @@ public class VisionIOSim implements VisionIO {
     inputs.heartbeat = heartbeat;
     inputs.targets = lastTargets;
     inputs.latencyMs = latencySeconds * 1000;
-    inputs.fps = kFrameRateHz;
+    inputs.fps = frameRateHz;
   }
 
   /** 最接近 time（不晚於 time）的歷史 pose；歷史不夠舊時用最舊的。 */

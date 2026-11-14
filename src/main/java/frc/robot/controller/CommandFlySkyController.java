@@ -22,7 +22,7 @@ public class CommandFlySkyController {
    * Construct an instance of a controller.
    */
   public CommandFlySkyController() {
-    m_hid = new FlySkyController();
+    this(new FlySkyController());
   }
 
   /**
@@ -31,7 +31,13 @@ public class CommandFlySkyController {
    * @param leftXChannel iBus channel indexes (0 = CH1) for each stick / switch
    */
   public CommandFlySkyController(int leftXChannel, int leftYChannel, int rightXChannel, int rightYChannel, int leftSwitchChannel, int rightSwitchChannel) {
-    m_hid = new FlySkyController(leftXChannel, leftYChannel, rightXChannel, rightYChannel, leftSwitchChannel, rightSwitchChannel);
+    this(new FlySkyController(leftXChannel, leftYChannel, rightXChannel, rightYChannel, leftSwitchChannel, rightSwitchChannel));
+  }
+
+  private CommandFlySkyController(FlySkyController hid) {
+    m_hid = hid;
+    // 每個 loop 記一次 FlySky 連線狀態（來源、通道值、USB-TTL 封包數）
+    CommandScheduler.getInstance().getDefaultButtonLoop().bind(m_hid::logTelemetry);
   }
 
   /**

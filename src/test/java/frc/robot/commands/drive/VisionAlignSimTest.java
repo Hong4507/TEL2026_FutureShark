@@ -86,6 +86,10 @@ class VisionAlignSimTest {
     return sy + dy * t - targetY;
   }
 
+  /** 指令開始後 dropoutDelay 秒，攝影機斷線 dropoutLength 秒（NaN = 不斷線）。 */
+  private double dropoutDelay = Double.NaN;
+  private double dropoutLength = 0;
+
   private record Result(boolean finished, double finalError, double hitError, double seconds) {}
 
   private Result run(VisionAlign.Target target, double startY, double distance, double headingDeg, int litColumn) {
@@ -101,6 +105,11 @@ class VisionAlignSimTest {
 
     VisionAlign cmd = new VisionAlign(drive, vision, target);
     CommandScheduler.getInstance().schedule(cmd);
+    if (!Double.isNaN(dropoutDelay)) {
+      double now = org.wpilib.system.Timer.getTimestamp();
+      VisionIOSim.dropoutFrom = now + dropoutDelay;
+      VisionIOSim.dropoutUntil = now + dropoutDelay + dropoutLength;
+    }
     double t = 0;
     while (cmd.isScheduled() && t < 7.0) {
       DriverStationSim.notifyNewData();
@@ -163,6 +172,52 @@ class VisionAlignSimTest {
       Result r = run(VisionAlign.Target.RIGHT, y, fallback, 90, 1);
       System.out.printf("  startY=%.1f (要移動 %.2f m)  error=%+.3f  time=%.2f  finished=%b%n",
           y, y + VisionConstants.kShooterForwardOfCameraMeters - kRightTargetY, r.finalError, r.seconds, r.finished);
+    }
+  }
+
+  /**
+   * 幀率 × 延遲掃描（只印結果）：VA_FPS=1 ./gradlew test --tests "*VisionAlignSimTest.fpsSweep" -i
+   * 便宜 webcam 暗處只有 15 fps、曝光 60 ms 以上，總延遲估 150 ms。MID 欄，要移動 0.3 m 與 1.0 m。
+   */
+  @org.junit.jupiter.api.Test
+  void fpsSweep() {
+    org.junit.jupiter.api.Assumptions.assumeTrue(System.getenv("VA_FPS") != null);
+    double fallback = RangeSensorConstants.kFallbackDistanceMeters;
+    double fwd = VisionConstants.kShooterForwardOfCameraMeters;
+    try {
+      for (double[] c : new double[][] {{30, 0.06}, {15, 0.06}, {15, 0.15}, {10, 0.20}}) {
+        VisionIOSim.frameRateHz = c[0];
+        VisionIOSim.latencySeconds = c[1];
+        for (double travel : new double[] {0.3, 1.0}) {
+          Result r = run(VisionAlign.Target.MID, kMidTargetY - fwd - travel, fallback, 90, 1);
+          System.out.printf("  fps=%2.0f 延遲=%3.0f ms travel=%.1f  落點誤差=%+.3f m  time=%.2f s%s%n",
+              c[0], c[1] * 1000, travel, r.hitError, r.seconds, r.seconds >= 4.99 ? " 逾時" : "");
+        }
+      }
+    } finally {
+      VisionIOSim.frameRateHz = VisionIOSim.kDefaultFrameRateHz;
+      VisionIOSim.latencySeconds = VisionIOSim.kDefaultLatencySeconds;
+    }
+  }
+
+  /**
+   * OV9281 實機約每 10 秒 USB 斷線一次，Jetson 端約 1 秒內重連（2026-11-14）。
+   * 斷線 1.2 秒時，不論發生在找目標、移動中或快到位，VisionAlign 都要靠里程計撐過去並對準。
+   */
+  @ParameterizedTest(name = "開始後 {0} s 斷線 1.2 s")
+  @CsvSource({"0.0", "0.3", "0.8", "1.5"})
+  void survivesCameraDropout(double delay) {
+    dropoutDelay = delay;
+    dropoutLength = 1.2;
+    try {
+      double fwd = VisionConstants.kShooterForwardOfCameraMeters;
+      Result r = run(VisionAlign.Target.MID, kMidTargetY - fwd - 0.6, RangeSensorConstants.kFallbackDistanceMeters, 90, 1);
+      System.out.printf("dropout@%.1f  落點誤差=%+.3f m  time=%.2f s%n", delay, r.hitError, r.seconds);
+      assertEquals(0, r.hitError, kFinalTolerance);
+    } finally {
+      dropoutDelay = Double.NaN;
+      VisionIOSim.dropoutFrom = Double.NaN;
+      VisionIOSim.dropoutUntil = Double.NaN;
     }
   }
 
