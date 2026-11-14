@@ -12,6 +12,7 @@ import org.littletonrobotics.junction.Logger;
 import org.wpilib.command2.Command;
 import org.wpilib.command2.Commands;
 import org.wpilib.command2.button.Trigger;
+import frc.FSLib.rangefinder.RangeSensors;
 import frc.robot.Constants.FieldConstants;
 import frc.robot.Constants.RobotMode;
 import frc.robot.commands.AutoRoutines;
@@ -72,7 +73,7 @@ public class RobotContainer {
         drive = new Drive(new DriveIOSpark(), new GyroIOOnboardIMU());
         turret = new Turret(new TurretReal());
         vision = new Vision(new VisionIONT());
-        turretLidar = new TurretLidar(new TurretLidarIONT());
+        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getTargetDistance());
         break;
       
       case kSim:
@@ -83,14 +84,14 @@ public class RobotContainer {
             ? new Vision(new VisionIONT())
             : new Vision(new VisionIOSim(drive::getPose));
         // 模擬沒有這顆感測器；用 NT 版本，可以拿 Jetson 或假的 publisher 測
-        turretLidar = new TurretLidar(new TurretLidarIONT());
+        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getTargetDistance());
         break;
 
       default:
         drive = new Drive(new DriveIO() {}, new GyroIO() {});
         turret = new Turret(new TurretIO() {});
         vision = new Vision(new VisionIO() {});
-        turretLidar = new TurretLidar(new TurretLidarIO() {});
+        turretLidar = new TurretLidar(new TurretLidarIO() {}, () -> RangeSensors.get().getTargetDistance());
         break;
     }
 

@@ -115,6 +115,16 @@
 4. 裝成服務：`sudo cp turret-tfluna.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now turret-tfluna`。
 5. Elastic「狀態」分頁「砲台TF-Luna」變綠、距離有值。
 
+### 5.8 砲台 TF-Luna 對準洞偵測
+
+1. 量鏡頭**離地高度**、**光束仰角**（度）、**鏡頭到射球點的水平前後差**，填進 `TurretLidar.kMountHeightMeters`／`kMountPitchDeg`／`kHorizontalOffsetMeters`。
+2. **先確認黑色板子讀得到**：在射擊距離讓光束打在板子上（不是洞），看 `TurretLidar/DistanceMeters`、`Strength`。
+   - 讀到正常距離、Strength ≥ 100 → OK。
+   - 讀到 0 或 Strength < 100 → ⚠️ 黑板反射率太低，分不出「板子」和「洞」，這個方法不能用（回報給我）。
+3. 看 `TurretLidar/BeamRow` 是 LOW／MID／HIGH（不是 NONE），否則光束根本打不到洞的高度，要改安裝角度。
+4. 沿著板子慢慢橫移：光束進洞時「對準洞」變綠、`TurretLidar/Beam` = `THROUGH_HOLE`，離開洞變回 `BOARD`。
+5. 洞後面如果有牆、讀值只比板子遠一點點 → 調小 `kHoleMarginMeters`（目前 0.3 m）。
+
 ---
 
 ## 6. VisionAlign 實機（約 30 分）

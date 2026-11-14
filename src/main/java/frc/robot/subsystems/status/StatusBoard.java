@@ -102,10 +102,13 @@ public class StatusBoard extends SubsystemBase {
 
     // ---- 距離 ----
     Logger.recordOutput("Status/Distance", String.format(Locale.ROOT, "%.2f m", RangeSensors.get().getTargetDistance()));
-    Logger.recordOutput("Status/TurretLidarDistance",
-        turretLidar.getDistanceMeters().isPresent()
+    // TF-Luna 前方範圍內沒東西或訊號太弱時回傳 0，不能直接顯示 0（看起來像貼著東西）
+    String lidarText = !turretLidar.isConnected() ? "未連線"
+        : turretLidar.getDistanceMeters().isPresent()
             ? String.format(Locale.ROOT, "%.2f m", turretLidar.getDistanceMeters().getAsDouble())
-            : "—");
+            : "超出範圍";
+    Logger.recordOutput("Status/TurretLidarDistance", lidarText);
+    Logger.recordOutput("Status/ThroughHole", turretLidar.isThroughHole());
 
     // ---- 電池 ----
     double battery = RobotController.getBatteryVoltage();

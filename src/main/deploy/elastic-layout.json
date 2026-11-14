@@ -265,7 +265,7 @@
             "title": "Auto 階段",
             "x": 576.0,
             "y": 384.0,
-            "width": 384.0,
+            "width": 256.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
@@ -277,9 +277,9 @@
           },
           {
             "title": "Enabled",
-            "x": 960.0,
+            "x": 1088.0,
             "y": 384.0,
-            "width": 320.0,
+            "width": 192.0,
             "height": 128.0,
             "type": "Boolean Box",
             "properties": {
@@ -288,6 +288,21 @@
               "data_type": "boolean",
               "true_color": 4283215696,
               "false_color": 4294198070
+            }
+          },
+          {
+            "title": "對準洞(砲台TF-Luna)",
+            "x": 832.0,
+            "y": 384.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/ThroughHole",
+              "period": 0.06,
+              "data_type": "boolean",
+              "true_color": 4283215696,
+              "false_color": 4288585374
             }
           }
         ]
