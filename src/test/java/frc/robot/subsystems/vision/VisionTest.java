@@ -18,7 +18,8 @@ class VisionTest {
   /** 在「相對射球點 errorMeters」的位置放一個洞，反推攝影機看到的 tx。 */
   private static Detection holeAt(double errorMeters, int cls) {
     double sign = kImageRightIsRobotForward ? 1 : -1;
-    double tx = Math.atan((errorMeters + kShooterForwardOfCameraMeters) / (sign * kDistance));
+    // ty = 0（在相機光軸高度）時，水平 tan = tan(tx) / cos(仰角)
+    double tx = Math.atan(Math.cos(Math.toRadians(kCameraPitchDeg)) * (errorMeters + kShooterForwardOfCameraMeters) / (sign * kDistance));
     return new Detection(cls, tx, 0, 0.9, 0.1, cls == kClassBonus ? 0 : -1);
   }
 
@@ -193,5 +194,20 @@ class VisionTest {
     d.addAll(column(-0.9));
     List<Double> cols = Vision.columnErrors(d, 2.0);
     assertTrue(Vision.columnError(cols, Column.MID).isPresent());
+  }
+
+  /** 攝影機仰 30°：直接正前方 tx = 0 → 0；不同高度的洞，同一個沿牆位置要換算成同一個值。 */
+  @org.junit.jupiter.api.Test
+  void pitchedCameraBearingIsHeightIndependent() {
+    assertEquals(0, Vision.horizontalBearingTan(0, 0.3), 1e-12);
+    double pitch = Math.toRadians(kCameraPitchDeg);
+    double lateral = 0.5, depth = 2.6;
+    for (double up : new double[] {0.7, 1.3, 1.9, 2.4}) {
+      double zc = depth * Math.cos(pitch) + up * Math.sin(pitch);
+      double yc = -depth * Math.sin(pitch) + up * Math.cos(pitch);
+      double tx = Math.atan2(lateral, zc);
+      double ty = Math.atan2(yc, Math.hypot(lateral, zc));
+      assertEquals(lateral / depth, Vision.horizontalBearingTan(tx, ty), 1e-9, "up=" + up);
+    }
   }
 }

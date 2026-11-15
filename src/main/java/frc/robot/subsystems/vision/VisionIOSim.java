@@ -23,6 +23,8 @@ import org.wpilib.system.Timer;
  */
 public class VisionIOSim implements VisionIO {
   private static final double kHorizontalFovRad = Math.toRadians(70);
+  /** Limelight 2 實測 VFOV 48.9°。 */
+  private static final double kVerticalFovRad = Math.toRadians(48.9);
   private static final double kHoleDiameterMeters = 0.40;
   private static final double kBonusDiameterMeters = 0.20;
   private static final double kNoiseRad = Math.toRadians(0.15);
@@ -129,9 +131,16 @@ public class VisionIOSim implements VisionIO {
     double depth = dx * fx + dy * fy;
     if (depth <= 0.3) return;
     double right = dx * rx + dy * ry;
-    double tx = Math.atan2(right, depth) + random.nextGaussian() * kNoiseRad;
+    // 攝影機往上仰 kCameraPitchDeg：世界座標（前 depth、右 right、上 up）→ 相機座標
+    double up = z - kCameraHeightMeters;
+    double pitch = Math.toRadians(kCameraPitchDeg);
+    double zc = depth * Math.cos(pitch) + up * Math.sin(pitch);
+    double yc = -depth * Math.sin(pitch) + up * Math.cos(pitch);
+    if (zc <= 0.1) return;
+    double tx = Math.atan2(right, zc) + random.nextGaussian() * kNoiseRad;
     if (Math.abs(tx) > kHorizontalFovRad / 2) return;
-    double ty = Math.atan2(z - kCameraHeightMeters, depth);
+    double ty = Math.atan2(yc, Math.hypot(right, zc));
+    if (Math.abs(ty) > kVerticalFovRad / 2) return;
     double width = 2 * Math.atan2(diameter / 2, depth);
     out.add(new double[] {cls, tx, ty, 0.9, width, litScore});
   }

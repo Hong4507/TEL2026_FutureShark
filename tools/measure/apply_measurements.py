@@ -2,8 +2,10 @@
 """把 11/15 量測記錄寫回程式：ShotTable 的資料表、各 Constants，並算自動流程建議發數。
 
 讀：
-  shot_table_1115.csv   row,distance_m,pitch_rad,hits_of_5,note
-                        row = LOW／MID／HIGH／BONUS；distance_m 用 NT RangeSensor/TargetDistance；
+  shot_table_1115.csv   row,distance_m,pitch_rad,hits_of_5,note,luna_slant_m
+                        row = LOW／MID／HIGH／BONUS；distance_m 用 NT RangeSensor/TargetDistance（console 樣本 {距離, 仰角} 的距離）；
+                        或是 distance_m 留空、luna_slant_m 填砲台 Luna 原始讀值（console「砲台TF-Luna斜距」），
+                        程式用目前的 TurretLidar 常數換算：距離 = 斜距 × cos(kMountPitchDeg) + kForwardOfShooterMeters；
                         pitch_rad 用 ManualTurret 收斂後的仰角（/Tuning/Manual/PitchRad）
   constants_1115.csv    name,value,unit,note
 空白欄位一律跳過（不會把程式裡原本的值清掉）。
@@ -61,6 +63,29 @@ def read_csv(path):
         return [{k.strip(): (v or "").strip() for k, v in r.items() if k} for r in csv.DictReader(f)]
 
 
+TURRET_LIDAR = os.path.join(JAVA, "robot", "subsystems", "turretlidar", "TurretLidar.java")
+
+
+def turret_lidar_constants():
+    """從 TurretLidar.java 讀 (kMountPitchDeg, kForwardOfShooterMeters)，和機器人程式保持一致。"""
+    with open(TURRET_LIDAR, encoding="utf-8") as f:
+        src = f.read()
+    vals = {}
+    for name in ("kMountPitchDeg", "kForwardOfShooterMeters"):
+        m = re.search(r"static final double " + name + r" = ([-0-9.eE]+);", src)
+        if not m:
+            raise SystemExit(f"❌ TurretLidar.java 找不到 {name}")
+        vals[name] = float(m.group(1))
+    return vals["kMountPitchDeg"], vals["kForwardOfShooterMeters"]
+
+
+def slant_to_distance(slant):
+    import math
+
+    pitch, forward = turret_lidar_constants()
+    return slant * math.cos(math.radians(pitch)) + forward
+
+
 def read_shots(path):
     """回傳 ({row: [(d, pitch, hits, note)]}, {row: [hits, shots]})，並檢查格式。"""
     points = {r: [] for r in ROW_ARRAYS}
@@ -72,6 +97,15 @@ def read_shots(path):
             errors.append(f"第 {i} 行：row「{row}」不是 LOW／MID／HIGH／BONUS")
             continue
         d, p, h = r.get("distance_m"), r.get("pitch_rad"), r.get("hits_of_5")
+        slant = r.get("luna_slant_m")
+        if not blank(slant):
+            converted = slant_to_distance(float(slant))
+            if blank(d):
+                d = f"{converted:.4f}"
+                print(f"第 {i} 行：砲台 Luna 斜距 {float(slant):.3f} → 距離 {converted:.3f} m")
+            elif abs(float(d) - converted) > 0.05:
+                print(f"⚠️ 第 {i} 行：distance_m {float(d):.3f} 和砲台 Luna 換算 {converted:.3f} 差 "
+                      f"{float(d) - converted:+.3f} m（用 distance_m；要用換算值就把 distance_m 清空）")
         if not blank(h):
             n = int(float(h))
             if not 0 <= n <= 5:

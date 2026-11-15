@@ -54,6 +54,13 @@ public final class VisionConstants {
    */
   public static final double kShooterForwardOfCameraMeters = 0.24241;
 
+  /**
+   * 攝影機（Limelight）仰角（度，往上為正）。11/15 實測 30°。
+   * 攝影機往上仰時，畫面的 tx 不等於「沿牆水平方向的角度」：要用 ty 一起換算（{@link Vision#horizontalBearingTan}），
+   * 不換算的話高列的洞沿牆位置會少算約 20%、中列約 10%，三列分不到同一欄。
+   */
+  public static final double kCameraPitchDeg = 30.0;
+
   /** 攝影機高度（公尺），只用在模擬。 */
   public static final double kCameraHeightMeters = 0.46459;
 

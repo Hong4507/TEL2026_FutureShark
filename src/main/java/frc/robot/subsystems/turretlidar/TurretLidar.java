@@ -127,6 +127,17 @@ public class TurretLidar extends SubsystemBase {
     Logger.recordOutput("TurretLidar/DistanceErrorMeters", distanceErrorMeters(horizontal));
   }
 
+  /**
+   * 砲台 Luna 原始讀值（沿光束的斜距，打在板上時）→ 插值表用的距離（= RangeSensor/TargetDistance 的定義：
+   * DownShooter 輪心到九宮格牆面的水平距離）。
+   * <pre>TargetDistance = 斜距 × cos(kMountPitchDeg) + kForwardOfShooterMeters</pre>
+   * （鏡頭在輪心前方 0.1588 m，所以要加回去）。假設車身正對牆面；讀 0（穿過洞／沒讀到）→ NaN。
+   */
+  public static double targetDistanceFromSlant(double slantMeters) {
+    if (!(slantMeters >= RangeSensorConstants.kMinValidRangeMeters)) return Double.NaN;
+    return slantMeters * Math.cos(Math.toRadians(kMountPitchDeg)) + kForwardOfShooterMeters;
+  }
+
   /** 光束打在第 row 列中心需要的鏡頭到板面水平距離（公尺）。 */
   public static double idealHorizontalMeters(int row) {
     return (kRowHeights[row] - kMountHeightMeters) / Math.tan(Math.toRadians(kMountPitchDeg));

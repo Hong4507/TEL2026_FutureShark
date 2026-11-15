@@ -86,10 +86,14 @@ public class ManualTurret extends Command {
     sampleCount++;
     double distance = RangeSensors.get().getTargetDistance();
     boolean atSpeed = turret.isNearTargetSpeeds(TurretConstants.kMaxSpeedRadPerSec, TurretConstants.kMaxSpeedRadPerSec * 0.8);
+    double slant = turretLidarMeters.getAsDouble();
+    double lunaDistance = frc.robot.subsystems.turretlidar.TurretLidar.targetDistanceFromSlant(slant);
+    // 前面 {距離, 仰角} 的距離 = 車身 Luna 的 TargetDistance（比賽時 ColumnShot 查表用的就是它）。
+    // 「砲台Luna換算」= 砲台 Luna 斜距 × cos(23°) + 0.1588，兩者應該差不多；差很多代表車身 Luna 或砲台 Luna 有問題。
     String line = String.format(Locale.ROOT,
-        "{%.3f, %.4f}, // #%d 實際仰角 %.4f, 飛輪%s, 砲台TF-Luna %.3f m",
+        "{%.3f, %.4f}, // #%d 實際仰角 %.4f, 飛輪%s, 砲台TF-Luna斜距 %.3f m → 換算距離 %.3f m（和車身Luna差 %+.3f）",
         distance, commandedPitch, sampleCount, turret.getPitchPositionRad(),
-        atSpeed ? "到速" : "未到速(這發不準)", turretLidarMeters.getAsDouble());
+        atSpeed ? "到速" : "未到速(這發不準)", slant, lunaDistance, lunaDistance - distance);
     System.out.println("ShotTable 樣本 " + line);
     Logger.recordOutput("ShotTable/Sample", line);
   }

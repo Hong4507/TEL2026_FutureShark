@@ -84,10 +84,23 @@ public class Vision extends SubsystemBase {
     return targetDistanceMeters + kCameraBehindShooterMeters;
   }
 
-  /** 目標沿機器人前進方向、相對射球點的位置（公尺）。distanceMeters 是攝影機鏡頭到板面的距離。 */
+  /** 目標沿機器人前進方向、相對射球點的位置（公尺）。distanceMeters 是攝影機鏡頭到板面的水平距離。 */
   public static double errorMeters(Detection d, double distanceMeters) {
     double sign = kImageRightIsRobotForward ? 1 : -1;
-    return sign * distanceMeters * Math.tan(d.txRad()) - kShooterForwardOfCameraMeters;
+    return sign * distanceMeters * horizontalBearingTan(d.txRad(), d.tyRad()) - kShooterForwardOfCameraMeters;
+  }
+
+  /**
+   * 攝影機仰角 {@link VisionConstants#kCameraPitchDeg} 時，(tx, ty) → 水平面上偏離鏡頭朝向的角度的 tan。
+   *
+   * <p>Jetson 的定義：tx = atan(x)、ty = atan(y / √(1 + x²))，(x, y, 1) 是去畸變後的相機座標射線（y 往上）。
+   * 相機往上仰 θ：射線在水平面上的前進分量 = cos θ − y·sin θ，側向分量 = x。
+   */
+  public static double horizontalBearingTan(double txRad, double tyRad) {
+    double x = Math.tan(txRad);
+    double y = Math.tan(tyRad) * Math.sqrt(1 + x * x);
+    double pitch = Math.toRadians(kCameraPitchDeg);
+    return x / (Math.cos(pitch) - y * Math.sin(pitch));
   }
 
   /**
