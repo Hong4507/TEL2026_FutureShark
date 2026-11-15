@@ -1,13 +1,18 @@
 name,value,unit,note
-kShooterInboardMeters,,m,射球點在右 frame 內側多少（暫定 0.25）
-kYawSign,,,LaserAlign 越轉越歪（LaserAlign/WrongDirection）就填 -1，正常填 1
-kLunaTrimMeters,,m,機器人擺正時讀 NT RangeSensor/RawFrameDiffMeters
-kEncoderMagnetOffsetRot,,rot,砲台放最低點讀 Turret/PitchEncoderAbsRot，填它的負值
-kRangeReference,,,GRID_WALL（量九宮格牆）或 LOW_WALL（黑板讀不到時改量矮牆）
-kTurretLunaHeightMeters,,m,砲台 Luna 鏡頭離地高度
-kTurretLunaPitchDeg,,deg,砲台 Luna 光束仰角（往上為正）
-kTurretLunaInboardMeters,,m,砲台 Luna 鏡頭在右 frame 內側多少（和射球點的水平差 = 這個 − kShooterInboardMeters）
-kShooterForwardOfCameraMeters,,m,射球點在鏡頭前方多少（VisionAlign 對準後偏哪邊就調這個）
+turretLunaInboardMeters,0.01073,m,記錄用：砲台 Luna 在面向九宮格那側 frame 內側多少（= 169.53 − 158.80，程式自動算）
+cameraBehindTurretLunaMeters,0.32045,m,記錄用：Limelight 在砲台 Luna 後方多少（深度）
+shooterExitHeightMeters,0.49084,m,記錄用：出球點約略高度 = 砲台 Luna 0.48029 + 10.55 mm（隨 Hood 仰角變；彈道公式 kTurretToRobotCenter.z 仍用 0.52，係數是配它調的）
+kShooterInboardMeters,0.16953,m,DownShooter 輪心（固定）在面向九宮格那側 frame 內側多少（深度）；改了要重量插值表
+kYawSign,1,,LaserAlign 越轉越歪（LaserAlign/WrongDirection）就填 -1，正常填 1
+kLunaTrimMeters,0,m,機器人擺正時讀 NT RangeSensor/RawFrameDiffMeters
+kEncoderMagnetOffsetRot,0.230469,rot,砲台放最低點讀 Turret/PitchEncoderAbsRot，填它的負值
+kRangeReference,GRID_WALL,,GRID_WALL（量九宮格牆）或 LOW_WALL（黑板讀不到時改量矮牆）
+kTurretLunaHeightMeters,0.48029,m,砲台 Luna 鏡頭離地高度
+kTurretLunaPitchDeg,30,deg,砲台 Luna 光束仰角（往上為正）
+kTurretLunaForwardOfShooterMeters,0.15880,m,砲台 Luna 在 DownShooter 輪心前方（朝九宮格）多少
+kCameraHeightMeters,0.46459,m,Limelight 鏡頭離地高度（只用在模擬）
+kCameraBehindShooterMeters,0.16165,m,Limelight 比 DownShooter 輪心離九宮格遠多少 = (10.73 + 320.45) − 169.53 mm
+kShooterForwardOfCameraMeters,0.24241,m,射球點在鏡頭的車頭方向多少（沿牆）= Limelight 在砲台 Luna 右方（車尾方向）242.41 mm；VisionAlign 偏哪邊再微調
 leftLunaHeightMeters,,m,記錄用：左 Luna 離地高度（光束要在低列洞下緣約 1.0 m 以下、矮牆以上）
 rightLunaHeightMeters,,m,記錄用：右 Luna 離地高度
 lowWallHeightMeters,,m,記錄用：矮牆高度

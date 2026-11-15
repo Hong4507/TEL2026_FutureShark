@@ -30,6 +30,7 @@ public class Constants {
   public static RobotMode kRobotMode = RobotMode.kDisable;
   public static enum RobotMode {
     kManual,
+    kRealManual,
     kAssist,
     kAuto,
     kDisable

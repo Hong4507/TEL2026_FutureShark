@@ -43,11 +43,13 @@ CONSTANTS = {
     "kEncoderMagnetOffsetRot": ("robot/subsystems/turret/TurretConstants.java", "kEncoderMagnetOffsetRot", "double"),
     "kTurretLunaHeightMeters": ("robot/subsystems/turretlidar/TurretLidar.java", "kMountHeightMeters", "double"),
     "kTurretLunaPitchDeg": ("robot/subsystems/turretlidar/TurretLidar.java", "kMountPitchDeg", "double"),
-    "kTurretLunaInboardMeters": ("robot/subsystems/turretlidar/TurretLidar.java", "kInboardMeters", "double"),
+    "kTurretLunaForwardOfShooterMeters": ("robot/subsystems/turretlidar/TurretLidar.java", "kForwardOfShooterMeters", "double"),
+    "kCameraHeightMeters": ("robot/subsystems/vision/VisionConstants.java", "kCameraHeightMeters", "double"),
+    "kCameraBehindShooterMeters": ("robot/subsystems/vision/VisionConstants.java", "kCameraBehindShooterMeters", "double"),
     "kShooterForwardOfCameraMeters": ("robot/subsystems/vision/VisionConstants.java", "kShooterForwardOfCameraMeters", "double"),
 }
 # 只記錄、不寫回程式的項目
-RECORD_ONLY = {"leftLunaHeightMeters", "rightLunaHeightMeters", "lowWallHeightMeters", "flywheelSpinUpSec"}
+RECORD_ONLY = {"shooterExitHeightMeters", "turretLunaInboardMeters", "cameraBehindTurretLunaMeters", "leftLunaHeightMeters", "rightLunaHeightMeters", "lowWallHeightMeters", "flywheelSpinUpSec"}
 
 
 def blank(v):

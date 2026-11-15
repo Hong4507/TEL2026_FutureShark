@@ -34,14 +34,13 @@ public class TurretLidar extends SubsystemBase {
 
   // ===== 安裝幾何（TODO 11/15 上機量測） =====
   /** 鏡頭離地高度（公尺）。 */
-  public static final double kMountHeightMeters = 0.52;
+  public static final double kMountHeightMeters = 0.48029;
   /** 光束仰角（度，往上為正）。 */
-  public static final double kMountPitchDeg = 0.0;
-  /**
-   * 砲台 Luna 鏡頭在右 frame 內側多少（公尺）。鏡頭到板面的水平距離 = 車身 Luna 牆距（右 frame → 九宮格）+ 這個值（§8.4）。
-   * 【待量 11/15】量到前先用 kShooterInboardMeters 的暫定值。
-   */
-  public static final double kInboardMeters = 0.25;
+  public static final double kMountPitchDeg = 30.0;
+  /** 砲台 Luna 鏡頭在 DownShooter 輪心前方（朝九宮格）多少公尺（11/15 實測 158.80 mm → 鏡頭深度 10.73 mm）。 */
+  public static final double kForwardOfShooterMeters = 0.15880;
+  /** 砲台 Luna 鏡頭在右 frame 內側多少（公尺）。鏡頭到板面的水平距離 = 車身 Luna 牆距（右 frame → 九宮格）+ 這個值（§8.4）。 */
+  public static final double kInboardMeters = RangeSensorConstants.kShooterInboardMeters - kForwardOfShooterMeters;
   /** 光束要穿過哪一列（§8.4 定案：中列）。 */
   public static final double kAimRowHeightMeters = FieldConstants.kMidTargetHeight;
   /** 光束打在板上的高度離洞中心超過（洞半徑 − 這個值）就算「超出範圍」，不判斷穿洞。 */

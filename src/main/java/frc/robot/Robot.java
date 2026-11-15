@@ -30,7 +30,9 @@ public class Robot extends LoggedRobot {
     Logger.recordMetadata("ProjectName", "TEL_2025"); 
     switch (Constants.kCurrentMode) {
       case kReal:
-        // Logger.addDataReceiver(new WPILOGWriter());
+        // 存 .wpilog 給 AdvantageScope 事後看。AdvantageKit 預設路徑 /U/logs 是 roboRIO 的 USB，
+        // SystemCore 沒有，所以改存家目錄底下的 logs/（例如 /home/systemcore/logs/）。
+        Logger.addDataReceiver(new WPILOGWriter(System.getProperty("user.home") + "/logs"));
         Logger.addDataReceiver(new NT4Publisher());
         break;
 

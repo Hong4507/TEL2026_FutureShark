@@ -36,8 +36,12 @@ public final class RangeSensorConstants {
   public static final double kRightLunaInboardMeters = 0.07042;
   /** 左 Luna 鏡頭在右 frame 內側多少（公尺）（機器人寬 0.4953 − 左 frame 內側 0.0127）。 */
   public static final double kLeftLunaInboardMeters = 0.4826;
-  /** 射球點在右 frame 內側多少（公尺）。【待量 11/15】量到前先用 0.25。 */
-  public static final double kShooterInboardMeters = 0.25;
+  /**
+   * DownShooter（下飛輪，固定位置）輪心在右 frame（面向九宮格那側）內側多少（公尺），垂直牆面方向的深度。
+   * 11/15 實測 169.53 mm。用輪心不用出球點：Hood 調仰角時出球點會動，輪心不會。
+   * TargetDistance = 牆距 + 這個值；插值表的距離也是用它算的，改了要重量插值表。
+   */
+  public static final double kShooterInboardMeters = 0.16953;
   /**
    * 兩顆 Luna 的固定差值（公尺）：機器人擺正時 (dL − kLeftLunaInboard) − (dR − kRightLunaInboard)。
    * 【待量 11/15】看 NT {@code RangeSensor/RawFrameDiffMeters}，擺正時的值直接填進來。

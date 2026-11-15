@@ -109,6 +109,7 @@ public class StatusBoard extends SubsystemBase {
     // ---- 模式 ----
     String mode = switch (Constants.kRobotMode) {
       case kManual -> "手動";
+      case kRealManual -> "真手動";
       case kAssist -> "輔助";
       case kAuto -> "自動";
       case kDisable -> "未選模式";

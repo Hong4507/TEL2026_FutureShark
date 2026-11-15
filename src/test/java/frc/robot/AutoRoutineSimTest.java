@@ -18,7 +18,10 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.simulation.SimHooks;
+import org.wpilib.units.measure.Angle;
 
+import frc.FSLib.rangefinder.RangeSensors;
+import frc.FSLib.rangefinder.TargetRangeSensor;
 import frc.robot.commands.AutoRoutines;
 import frc.robot.commands.AutoRoutines.Half;
 import frc.robot.commands.AutoRoutines.Plan;
@@ -58,10 +61,24 @@ class AutoRoutineSimTest {
     DriverStationSim.setRobotMode(RobotMode.AUTONOMOUS);
     DriverStationSim.setEnabled(true);
     DriverStationSim.notifyNewData();
+    // 模擬沒有 TF-Luna（DualTFLuna 會一直回預設 3.0 m，和實際 2.5 m 不符，VisionAlign 換算會偏）。
+    // 改用模擬位置算：VisionIOSim 的攝影機在機器人中心，所以 cameraDistance(TargetDistance) 要等於 kTargetX − x。
+    RangeSensors.setForTesting(new TargetRangeSensor() {
+      @Override
+      public double getTargetDistance() {
+        return kTargetX - drive.getPose().getX() - VisionConstants.kCameraBehindShooterMeters;
+      }
+
+      @Override
+      public Angle getYaw() {
+        return null; // 和原本一樣：沒有 yaw，LaserAlign 直接結束
+      }
+    });
   }
 
   @AfterEach
   void teardown() {
+    RangeSensors.setForTesting(null);
     CommandScheduler.getInstance().cancelAll();
     CommandScheduler.getInstance().unregisterAllSubsystems();
     DriverStationSim.setEnabled(false);

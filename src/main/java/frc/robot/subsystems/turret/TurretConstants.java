@@ -11,13 +11,29 @@ public class TurretConstants {
   public static final int kTriggerMotorID = 12;
   public static final int kEncoderID = 15;
 
-  public static final double kMaxAngleRad = 1.45;
-  public static final double kMinAngleRad = 0.6981317;
-
   public static final double kSensorToMechanismRatio = 6.875;
 
   /**
-   * CANcoder 磁鐵偏移（圈），讓「砲台在最低點時」絕對位置剛好 = 0。TODO: 上機校正後填入。
+   * 砲台仰角上下限（rad）。setPitch／ShotTable／彈道公式／ManualTurret 全部用這個單位。
+   *
+   * <p>仰角 = kMinAngleRad + CANcoder 圈數 × 2π ÷ kSensorToMechanismRatio。開機時 CANcoder 設成 0，
+   * 所以**開機前砲台要靠在下限位**（= kMinAngleRad = 40°）；上限位時 CANcoder 約 0.82 圈。
+   */
+  public static final double kMaxAngleRad = 1.45;
+  public static final double kMinAngleRad = 0.6981317;
+
+  /** 仰角馬達最大電壓：限制 PID 輸出，避免一切換模式就全速衝。 */
+  public static final double kPitchMaxVolts = 6.0;
+
+  /** 仰角最快移動速度（rad/s）與加速度（rad/s²）。太慢就調高，還會衝過頭就調低。 */
+  public static final double kPitchMaxVelRadPerSec = 2.0;
+  public static final double kPitchMaxAccelRadPerSecSq = 6.0;
+
+  /**
+   * 目前仰角用 CANcoder **相對位置**（開機時 CANcoder = 0 = kMinAngleRad，開機前砲台要靠在下限位），
+   * 下面兩個常數只影響記錄用的 Turret/PitchEncoderAbsRot；保留給之後改回絕對位置用。
+   *
+   * <p>CANcoder 磁鐵偏移（圈），讓「砲台在最低點時」絕對位置剛好 = 0。
    *
    * <p>校正步驟：
    * <ol>
@@ -28,7 +44,7 @@ public class TurretConstants {
    * </ol>
    * 範圍 -1 ~ 1。
    */
-  public static final double kEncoderMagnetOffsetRot = 0.0;
+  public static final double kEncoderMagnetOffsetRot = 0.230469;
 
   /**
    * 絕對位置的跳變點（圈）。讀值範圍是 [kEncoderDiscontinuityPointRot - 1, kEncoderDiscontinuityPointRot)。

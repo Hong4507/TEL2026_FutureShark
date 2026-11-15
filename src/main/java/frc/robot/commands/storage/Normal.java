@@ -1,12 +1,15 @@
 package frc.robot.commands.storage;
 
-import org.wpilib.system.Timer;
 import org.wpilib.command2.Command;
 import frc.robot.subsystems.storage.Stroage;
 
+/**
+ * Storage 預設指令：L298N 上的三顆馬達（左、右 Storage 與 L298N Trigger 通道）**一律正轉**，
+ * 把球一路送到砲台；真正決定射不射的是砲台的 NEO550 擊發馬達（Turret.setTrigger）。
+ * 機器人 disable 時由 Stroage.periodic() 全部關掉。
+ */
 public class Normal extends Command {
   private final Stroage stroage;
-  private final Timer timer = new Timer();
 
   public Normal(Stroage stroage) {
     this.stroage = stroage;
@@ -14,26 +17,17 @@ public class Normal extends Command {
   }
 
   @Override
-  public void initialize() {
-    timer.restart();
-  }
-
-  @Override
   public void execute() {
-    if (timer.get() < 0.3) {
-      stroage.setStorageDirection(false);
-      stroage.setStorageSpeed(1);
-    } else if (timer.get() < 1.5) {
-      stroage.setStorageDirection(true);
-      stroage.setStorageSpeed(1);
-    } else {
-      timer.reset();
-    }
+    stroage.setStorageDirection(true);
+    stroage.setStorageSpeed(1);
+    stroage.setTriggerDirection(true);
+    stroage.setTriggerSpeed(1);
   }
 
   @Override
   public void end(boolean interrupted) {
     stroage.disableStorage();
+    stroage.disableTrigger();
   }
 
   @Override

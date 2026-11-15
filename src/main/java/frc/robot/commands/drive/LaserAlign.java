@@ -41,6 +41,12 @@ public class LaserAlign extends Command {
   public LaserAlign(Drive drive) {
     this.drive = drive;
     addRequirements(drive);
+    // 開機就發布，沒跑過也看得到 key（AdvantageKit 只在第一次 recordOutput 後才建立 NT topic）
+    Logger.recordOutput("LaserAlign/Active", false);
+    Logger.recordOutput("LaserAlign/WrongDirection", false);
+    Logger.recordOutput("LaserAlign/YawValid", false);
+    Logger.recordOutput("LaserAlign/ErrorRad", Double.NaN);
+    Logger.recordOutput("LaserAlign/EndReason", "NotRun");
   }
 
   @Override
@@ -49,12 +55,16 @@ public class LaserAlign extends Command {
     totalTimer.restart();
     startErrorRad = Double.NaN;
     wrongWay = false;
+    Logger.recordOutput("LaserAlign/Active", true);
     Logger.recordOutput("LaserAlign/WrongDirection", false);
+    Logger.recordOutput("LaserAlign/EndReason", "Running");
   }
 
   @Override
   public void execute() {
     yaw = rangeSensor.getYaw();
+    Logger.recordOutput("LaserAlign/YawValid", yaw != null);
+    if (yaw == null) Logger.recordOutput("LaserAlign/ErrorRad", Double.NaN);
     if (yaw != null) {
       double error = Math.abs(Math.PI / 2 - yaw.in(Radians));
       if (Double.isNaN(startErrorRad)) startErrorRad = error;
@@ -77,6 +87,15 @@ public class LaserAlign extends Command {
   @Override
   public void end(boolean interrupted) {
     drive.setVelocity(0, 0);
+    String reason;
+    if (interrupted) reason = "Interrupted";
+    else if (yaw == null) reason = "NoYaw";            // 測距無效（Luna 讀 0／單邊有效）
+    else if (wrongWay) reason = "WrongDirection";
+    else if (MathUtil.isNear(Math.PI / 2, yaw.in(Radians), kToleranceRad)) reason = "Aligned";
+    else if (totalTimer.hasElapsed(kTimeoutSec)) reason = "Timeout";
+    else reason = "Other";
+    Logger.recordOutput("LaserAlign/Active", false);
+    Logger.recordOutput("LaserAlign/EndReason", reason);
   }
 
   @Override

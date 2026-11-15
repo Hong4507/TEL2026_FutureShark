@@ -55,7 +55,7 @@ public class Vision extends SubsystemBase {
     }
     detections = Collections.unmodifiableList(parsed);
 
-    double distance = rangeSensor.getTargetDistance();
+    double distance = Vision.cameraDistance(rangeSensor.getTargetDistance());
     Logger.recordOutput("Vision/DetectionCount", detections.size());
     Logger.recordOutput("Vision/ColumnErrorsMeters", getColumnErrors(distance).stream().mapToDouble(Double::doubleValue).toArray());
     Logger.recordOutput("Vision/LitErrorMeters", getLitError(distance).orElse(Double.NaN));
@@ -79,7 +79,12 @@ public class Vision extends SubsystemBase {
     return detections;
   }
 
-  /** 目標沿機器人前進方向、相對射球點的位置（公尺）。 */
+  /** DownShooter 輪心到板面距離（TargetDistance）→ 攝影機鏡頭到板面距離。 */
+  public static double cameraDistance(double targetDistanceMeters) {
+    return targetDistanceMeters + kCameraBehindShooterMeters;
+  }
+
+  /** 目標沿機器人前進方向、相對射球點的位置（公尺）。distanceMeters 是攝影機鏡頭到板面的距離。 */
   public static double errorMeters(Detection d, double distanceMeters) {
     double sign = kImageRightIsRobotForward ? 1 : -1;
     return sign * distanceMeters * Math.tan(d.txRad()) - kShooterForwardOfCameraMeters;

@@ -520,3 +520,34 @@ YOLO 只負責**水平對準**九宮格的某一欄；牆面角度仍由 TF-Luna
 7. **待函式庫出 2027 版後可恢復**：MapleSim（移除 `build.gradle` 的 `exclude`、恢復 `Robot.simulationPeriodic()`）、URCL（恢復 `Logger.registerURCL`）。
 8. **砲台 CANcoder 校正**：`kEncoderMagnetOffsetRot` 先 0 部署 → 砲台放最低點 → 讀 `Turret/PitchEncoderAbsRot` → 填它的負值。往上推時讀值應變大，變小代表要反轉 `SensorDirection`。
 9. **Storage 補球**：射一發後 `Turret/ShotCount` +1，Storage 應反轉 0.3 秒再正轉送球。
+
+## LaserAlign NT 診斷輸出（2026-11-15）
+
+- 問題：`LaserAlign/*` 只有指令執行時才寫，開機後 NT 看不到；測距無效（yaw = null）時指令第一個週期就結束，`ErrorRad` 永遠不會出現。
+- 改法（`commands/drive/LaserAlign.java`）：建構時就發布所有 key；新增
+  - `LaserAlign/Active`：指令是否在跑
+  - `LaserAlign/YawValid`：這個週期測距是否有效（false 時 `ErrorRad` = NaN）
+  - `LaserAlign/EndReason`：`NotRun`／`Running`／`Aligned`／`NoYaw`／`WrongDirection`／`Timeout`／`Interrupted`
+- NT 路徑：`/AdvantageKit/RealOutputs/LaserAlign/...`。觸發條件：非 Manual 模式＋已 enable＋lefttop。
+
+## 11/15 量測寫回（第一批）
+
+**方向約定**：射球方向 = 機器人右側（面向九宮格）。隊員量測時把「面向九宮格」當前方，所以他說的「右側 frame」= **車尾**、「左側 frame」= **車頭**。程式裡的「右 frame」= 面向九宮格那側（深度基準）。
+
+| 常數 | 舊值 | 新值 | 來源 |
+|---|---|---|---|
+| `kShooterInboardMeters`（**DownShooter 輪心**深度） | 0.25 | 0.16953 | 基準改成 DownShooter 輪心：Hood 調仰角時出球點會動，輪心不會 |
+| `kLunaTrimMeters` | 0.0 | 0.0 | 實測 -0.61 mm，可忽略 |
+| `kEncoderMagnetOffsetRot` | 0.0 | 0.230469 | 已確認最低點讀 ≈ 0 |
+| `TurretLidar.kMountHeightMeters` | 0.52 | 0.48029 | 實測 |
+| `TurretLidar.kMountPitchDeg` | 0 | 30 | 已確認 |
+| `TurretLidar.kForwardOfShooterMeters`（新增） | — | 0.15880 | 光達在 DownShooter 輪心前方（朝九宮格）；→ 光達深度 10.73 mm（實測一致） |
+| `TurretLidar.kInboardMeters` | 0.25 | `kShooterInboardMeters − kForwardOfShooterMeters` | 改成算出來的 |
+| `VisionConstants.kShooterForwardOfCameraMeters` | 0.15 | 0.24241 | Limelight 在砲台 Luna 右方（面向九宮格的右＝車尾）242.41 mm |
+| `VisionConstants.kCameraHeightMeters` | 0.45 | 0.46459 | 只用在模擬 |
+| `VisionConstants.kCameraBehindShooterMeters`（新增） | — | 0.16165 | Limelight 在砲台 Luna 後方 320.45 mm → 深度 331.18 − 169.53 mm |
+
+- `Vision.cameraDistance()` = TargetDistance + `kCameraBehindShooterMeters`：tx → 公尺改用鏡頭到板面距離。`Vision.periodic()`、`VisionAlign.execute()` 都用它。
+- `AutoRoutineSimTest` 加假測距（依模擬位置），原本 DualTFLuna 在模擬回預設 3.0 m（實際 2.5 m），`kShooterForwardOfCameraMeters` 變大後不跑路徑的案例落點偏 5 cm 超出容許。⚠️ 實機同理：**TargetDistance 不準會讓 VisionAlign 偏**，偏差 ≈ kShooterForwardOfCameraMeters × 距離誤差比例。
+- `apply_measurements.py`：新增 `kCameraHeightMeters`、`kCameraBehindShooterMeters`、`kTurretLunaForwardOfShooterMeters`；`turretLunaInboardMeters`、`cameraBehindTurretLunaMeters` 只記錄。
+- CSV 要存成 UTF-8（Excel 存會壞），長度單位公尺。

@@ -84,7 +84,7 @@ public class VisionAlign extends Command {
 
   @Override
   public void execute() {
-    double distance = rangeSensor.getTargetDistance();
+    double distance = Vision.cameraDistance(rangeSensor.getTargetDistance());
 
     // 里程計補償：機器人往前開了 delta，目標相對位置就少 delta
     Pose2d pose = drive.getPose();

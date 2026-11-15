@@ -24,10 +24,10 @@ import frc.robot.commands.drive.LaserAlign;
 import frc.robot.commands.drive.VisionAlign;
 import frc.robot.commands.drive.DriveCommands;
 import frc.robot.commands.storage.Normal;
-import frc.robot.commands.storage.StorageCommands;
 import frc.robot.commands.turret.AssistTurret;
 import frc.robot.commands.turret.ColumnShot;
 import frc.robot.commands.turret.ManualTurret;
+import frc.robot.commands.turret.RealManualTurret;
 import frc.robot.controller.CommandFlySkyController;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveIO;
@@ -140,6 +140,7 @@ public class RobotContainer {
     Logger.recordOutput("Mode", "disable");
     drive.setDefaultCommand(DriveCommands.arcadeDrive(drive, () -> controller.getLeftY(), () -> -controller.getLeftX()));
 
+    // L298N 上的馬達（Storage 左右 + L298N Trigger 通道）一律正轉；只靠砲台 NEO550 擊發
     stroage.setDefaultCommand(new Normal(stroage));
 
     configureBindings();
@@ -162,6 +163,7 @@ public class RobotContainer {
         Logger.recordOutput("Mode", "Manual");
       }).ignoringDisable(true)
     );
+    // 要用真手動（仰角、轉速固定，只擊發）時，把上面的 kManual／"Manual" 換成 kRealManual／"RealManual"
     controller.leftSwitch().and(midmid()).and(isDisable())
       .onTrue(Commands.runOnce(() -> {
         Constants.kRobotMode = RobotMode.kAssist;
@@ -176,7 +178,7 @@ public class RobotContainer {
     );
     
     // isDisable 時 lefttop 是啟動自動流程用的，不能同時觸發 LaserAlign（兩個都要 drive，會互相打斷）
-    isManual().negate().and(isDisable().negate()).and(lefttop())
+    isManual().negate().and(isRealManual().negate()).and(isDisable().negate()).and(lefttop())
       .onTrue(new LaserAlign(drive));
 
     controller.rightSwitch().and(isAuto()).and(righttop())
@@ -205,6 +207,15 @@ public class RobotContainer {
         )
       );
 
+    // 真手動：仰角、轉速固定，左搖桿 X 往右推 = 擊發
+    controller.rightSwitch().and(isRealManual())
+      .whileTrue(
+        Commands.parallel(
+          new RealManualTurret(turret, () -> controller.getLeftX() > 0.3),
+          Commands.idle(drive)
+        )
+      );
+
     controller.rightSwitch().and(isManual())
       .whileTrue(
         Commands.parallel(
@@ -215,7 +226,6 @@ public class RobotContainer {
       );
     
     
-    turret.ballFired().onTrue(StorageCommands.reload(stroage));
   }
 
   public Trigger isDisable() {
@@ -224,6 +234,10 @@ public class RobotContainer {
 
   public Trigger isManual() {
     return new Trigger(() -> Constants.kRobotMode == RobotMode.kManual);
+  }
+
+  public Trigger isRealManual() {
+    return new Trigger(() -> Constants.kRobotMode == RobotMode.kRealManual);
   }
 
   public Trigger isAssist() {

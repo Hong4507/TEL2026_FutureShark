@@ -3,11 +3,11 @@ package frc.robot.subsystems.turret;
 import org.wpilib.math.filter.SlewRateLimiter;
 
 public class TurretSim implements TurretIO {
-  private final SlewRateLimiter pitchLimiter = new SlewRateLimiter(4);
+  private final SlewRateLimiter pitchLimiter = new SlewRateLimiter(4, -4, TurretConstants.kMinAngleRad);
 
   private double upSpeed = 0;
   private double downSpeed = 0;
-  private double pitch = 0;
+  private double pitch = TurretConstants.kMinAngleRad;
 
   @Override
   public void updateInputs(TurretIOInputs inputs) {
