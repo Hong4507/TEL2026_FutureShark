@@ -551,3 +551,23 @@ YOLO 只負責**水平對準**九宮格的某一欄；牆面角度仍由 TF-Luna
 - `AutoRoutineSimTest` 加假測距（依模擬位置），原本 DualTFLuna 在模擬回預設 3.0 m（實際 2.5 m），`kShooterForwardOfCameraMeters` 變大後不跑路徑的案例落點偏 5 cm 超出容許。⚠️ 實機同理：**TargetDistance 不準會讓 VisionAlign 偏**，偏差 ≈ kShooterForwardOfCameraMeters × 距離誤差比例。
 - `apply_measurements.py`：新增 `kCameraHeightMeters`、`kCameraBehindShooterMeters`、`kTurretLunaForwardOfShooterMeters`；`turretLunaInboardMeters`、`cameraBehindTurretLunaMeters` 只記錄。
 - CSV 要存成 UTF-8（Excel 存會壞），長度單位公尺。
+
+## 不用視覺的自動流程＋砲台 Luna 23°（2026-11-15）
+
+- **砲台 Luna 仰角 30° → 23°**（和鉛直線 67°）。鏡頭高 0.48029 m 時，光束打到各列中心需要的「鏡頭到板面水平距離」：
+  低列 1.696 m、**中列 3.109 m**、高列 4.523 m；每列有效範圍約 ±0.35 m。鏡頭深度 0.0107 m，所以牆距 ≈ 上面的值 − 0.01。
+  ⚠️ **牆距 2.5 m 時光束高度 ≈ 1.55 m，剛好打在低列和中列之間的板子，哪個洞都穿不過**。要用 Luna 找洞，機器人要擺在牆距約 3.1 m（中列）或 1.7 m（低列）。
+- `TurretLidar`：不再固定看中列，改看「光束最靠近的那一列」；Elastic「砲台Luna」改成 `中列 打在板上 +0.05m`／`中列 太遠 +0.42m`／`低列 太近 -0.30m`
+  （正 = 離牆太遠、負 = 太近，數字是要移動的距離）。新增 NT `TurretLidar/NearestRow`、`DistanceErrorMeters`、`HorizontalMeters`、`RawThroughHole`。
+  車身偏航（車身 Luna 算的）也算進光束斜距。Luna 只有一個點，看不出洞在左還右 → 沿牆方向交給自動找洞。
+- **新自動流程 `AutoRoutines.lunaColumn`**（Elastic「賽前」新選單 **Auto 方式**，預設「砲台Luna找洞（不用視覺）」）：
+  1. 飛輪開始轉＋往前走 `/Tuning/LunaAuto/ApproachMeters`（預設 0.3，賽前頁可改）。
+  2. `LidarHoleAlign`：慢慢走（0.12 m/s），記下光束「進洞」「出洞」的位置，開回中間（扣掉偵測延遲）；開始找時已經在洞裡會先倒退到洞外再量。
+  3. 找到 → 低／中／高各射 `BallsPerHole` 發（上半場預設 3）。
+  4. 走不動（被對手擋住：0.5 s 前進 < 2 cm）或走完 `SearchMeters`（1.5）沒找到 → `LidarTurnScan` 原地慢慢轉（約 10°/s，最多 `ScanMaxDeg` 40°），
+     一樣量進洞／出洞角度轉回中間，**找到才射**，插值表距離用「正對距離 / cos(轉角)」；沒找到就轉回原角度、不射。
+  5. 砲台 Luna 停用或斷線 → 只走 ApproachMeters，原地直接射 9 發（= 人工擺位）。
+  - 方向由起點決定：**右起點往車頭走、逆時針轉；左起點往車尾走、順時針轉**（都是往中欄方向）。
+  - NT log：`LunaAuto/AlignState`、`AlignResult`（CENTERED／IN_HOLE／NOT_FOUND／BLOCKED／UNAVAILABLE）、`ScanState`、`ScanFound`、`ScanDeg`、`Auto/Stage`。
+- 模擬：`TurretLidarIOSim`（依位置射線打九宮格，光點半徑 = 斜距 × tan 1°），`./gradlew run` 預設用它（`TURRET_LIDAR_IO=nt` 改讀 NT）。
+  `AutoLunaSimTest` 9 項：左右起點、起點已在洞裡、已過第一欄、被擋住後轉找（左右）、找不到不射、Luna 斷線原地射。落點誤差：沿牆找 ≤ 0.7 cm，轉找 ≤ 3.3 cm。

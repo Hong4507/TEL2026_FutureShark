@@ -1,6 +1,7 @@
 package frc.robot.subsystems.turretlidar;
 
 import java.util.OptionalDouble;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
 import org.littletonrobotics.junction.Logger;
@@ -35,14 +36,23 @@ public class TurretLidar extends SubsystemBase {
   // ===== 安裝幾何（TODO 11/15 上機量測） =====
   /** 鏡頭離地高度（公尺）。 */
   public static final double kMountHeightMeters = 0.48029;
-  /** 光束仰角（度，往上為正）。 */
-  public static final double kMountPitchDeg = 30.0;
+  /**
+   * 光束仰角（度，往上為正）。11/15 實測：和鉛直線夾 67° → 90 − 67 = 23°。
+   *
+   * <p>23° 時光束打到各列中心需要的「鏡頭到板面水平距離」（鏡頭高 0.48029 m）：
+   * 低列 ≈ 1.696 m、中列 ≈ 3.109 m、高列 ≈ 4.523 m（{@link #idealHorizontalMeters}）。
+   * 鏡頭深度只有 0.0107 m，所以「牆距」≈ 這個值 − 0.0107。每一列的有效範圍 ±0.15 / tan 23° ≈ ±0.35 m。
+   * ⚠️ 牆距 2.5 m 時光束高度 ≈ 1.55 m，剛好打在低列和中列中間的板子上，穿不過任何洞。
+   */
+  public static final double kMountPitchDeg = 23.0;
   /** 砲台 Luna 鏡頭在 DownShooter 輪心前方（朝九宮格）多少公尺（11/15 實測 158.80 mm → 鏡頭深度 10.73 mm）。 */
   public static final double kForwardOfShooterMeters = 0.15880;
   /** 砲台 Luna 鏡頭在右 frame 內側多少（公尺）。鏡頭到板面的水平距離 = 車身 Luna 牆距（右 frame → 九宮格）+ 這個值（§8.4）。 */
   public static final double kInboardMeters = RangeSensorConstants.kShooterInboardMeters - kForwardOfShooterMeters;
-  /** 光束要穿過哪一列（§8.4 定案：中列）。 */
-  public static final double kAimRowHeightMeters = FieldConstants.kMidTargetHeight;
+  /** 各列洞中心高度（低／中／高）。光束在哪一列附近就用哪一列判斷（距離不同會穿過不同列）。 */
+  static final double[] kRowHeights = {
+    FieldConstants.kLowTargetHeight, FieldConstants.kMidTargetHeight, FieldConstants.kHighTargetHeight};
+  static final String[] kRowNames = {"低列", "中列", "高列"};
   /** 光束打在板上的高度離洞中心超過（洞半徑 − 這個值）就算「超出範圍」，不判斷穿洞。 */
   public static final double kRowEdgeMarginMeters = 0.05;
 
@@ -66,14 +76,25 @@ public class TurretLidar extends SubsystemBase {
   private final TurretLidarIOInputsAutoLogged inputs = new TurretLidarIOInputsAutoLogged();
   /** 右 frame 到九宮格牆面的距離（RangeSensor/WallDistance），無效時 empty。 */
   private final Supplier<OptionalDouble> wallDistanceMeters;
+  /** 車身相對牆面的偏航（rad，0 = 正對；原地轉找洞時光束斜打，路徑變長）。 */
+  private final DoubleSupplier yawErrorRad;
   private final Debouncer holeDebouncer = new Debouncer(kDebounceSeconds, Debouncer.DebounceType.BOTH);
+  private final Debouncer rawHoleDebouncer = new Debouncer(kDebounceSeconds, Debouncer.DebounceType.BOTH);
 
   private Beam beam = Beam.NO_DATA;
+  private Beam rawBeam = Beam.NO_DATA;
   private boolean throughHole = false;
+  private boolean rawThroughHole = false;
+  private double horizontal = Double.NaN;
 
   public TurretLidar(TurretLidarIO io, Supplier<OptionalDouble> wallDistanceMeters) {
+    this(io, wallDistanceMeters, () -> 0.0);
+  }
+
+  public TurretLidar(TurretLidarIO io, Supplier<OptionalDouble> wallDistanceMeters, DoubleSupplier yawErrorRad) {
     this.io = io;
     this.wallDistanceMeters = wallDistanceMeters;
+    this.yawErrorRad = yawErrorRad;
   }
 
   @Override
@@ -82,16 +103,17 @@ public class TurretLidar extends SubsystemBase {
     Logger.processInputs("TurretLidar", inputs);
 
     OptionalDouble wall = wallDistanceMeters.get();
-    double horizontal = wall.isPresent() ? wall.getAsDouble() + kInboardMeters : Double.NaN;
+    double yaw = yawErrorRad.getAsDouble();
+    if (!Double.isFinite(yaw)) yaw = 0;
+    horizontal = wall.isPresent() ? (wall.getAsDouble() + kInboardMeters) / Math.cos(yaw) : Double.NaN;
     double expected = expectedBoardDistance(horizontal);
     double beamHeight = beamHeightAtBoard(horizontal);
-    if (!enabled.get()) {
-      beam = Beam.DISABLED;
-    } else {
-      beam = classify(inputs.connected, inputs.distanceMeters, inputs.strength, expected);
-      if (beam != Beam.NO_DATA && !inValidRange(beamHeight)) beam = Beam.OUT_OF_RANGE;
-    }
+    rawBeam = enabled.get() ? classify(inputs.connected, inputs.distanceMeters, inputs.strength, expected) : Beam.DISABLED;
+    beam = rawBeam;
+    if (beam != Beam.NO_DATA && beam != Beam.DISABLED && !inValidRange(beamHeight)) beam = Beam.OUT_OF_RANGE;
     throughHole = holeDebouncer.calculate(beam == Beam.THROUGH_HOLE);
+    // 自動對準用：不看距離範圍（被對手擋住時車身 Luna 的牆距可能是錯的），只看光束有沒有穿過去
+    rawThroughHole = rawHoleDebouncer.calculate(rawBeam == Beam.THROUGH_HOLE);
 
     Logger.recordOutput("TurretLidar/Valid", isValid());
     Logger.recordOutput("TurretLidar/ExpectedBoardMeters", expected);
@@ -99,6 +121,33 @@ public class TurretLidar extends SubsystemBase {
     Logger.recordOutput("TurretLidar/BeamRow", rowAtHeight(beamHeight));
     Logger.recordOutput("TurretLidar/Beam", beam.name());
     Logger.recordOutput("TurretLidar/ThroughHole", throughHole);
+    Logger.recordOutput("TurretLidar/RawThroughHole", rawThroughHole);
+    Logger.recordOutput("TurretLidar/HorizontalMeters", horizontal);
+    Logger.recordOutput("TurretLidar/NearestRow", Double.isNaN(beamHeight) ? "?" : kRowNames[nearestRow(beamHeight)]);
+    Logger.recordOutput("TurretLidar/DistanceErrorMeters", distanceErrorMeters(horizontal));
+  }
+
+  /** 光束打在第 row 列中心需要的鏡頭到板面水平距離（公尺）。 */
+  public static double idealHorizontalMeters(int row) {
+    return (kRowHeights[row] - kMountHeightMeters) / Math.tan(Math.toRadians(kMountPitchDeg));
+  }
+
+  /** 光束高度離哪一列最近（0 低、1 中、2 高）。 */
+  static int nearestRow(double beamHeightMeters) {
+    int best = 0;
+    for (int i = 1; i < kRowHeights.length; i++) {
+      if (Math.abs(beamHeightMeters - kRowHeights[i]) < Math.abs(beamHeightMeters - kRowHeights[best])) best = i;
+    }
+    return best;
+  }
+
+  /**
+   * 現在的水平距離 − 最近那一列的理想水平距離（公尺）。正 = 太遠（往牆靠近），負 = 太近（離牆遠一點）。
+   * 沒有牆距 = NaN。
+   */
+  static double distanceErrorMeters(double horizontalMeters) {
+    if (Double.isNaN(horizontalMeters)) return Double.NaN;
+    return horizontalMeters - idealHorizontalMeters(nearestRow(beamHeightAtBoard(horizontalMeters)));
   }
 
   /** 沿光束方向到板面的距離。 */
@@ -116,18 +165,30 @@ public class TurretLidar extends SubsystemBase {
    * 換成水平距離約 ±(0.2 − 0.05) / tan(光束仰角)。NaN（沒有牆距）→ false。
    */
   static boolean inValidRange(double beamHeightMeters) {
-    return Math.abs(beamHeightMeters - kAimRowHeightMeters) <= kHoleRadiusMeters - kRowEdgeMarginMeters;
+    if (Double.isNaN(beamHeightMeters)) return false;
+    return Math.abs(beamHeightMeters - kRowHeights[nearestRow(beamHeightMeters)])
+        <= kHoleRadiusMeters - kRowEdgeMarginMeters;
   }
 
-  /** 給 Elastic 的中文狀態。 */
+  /**
+   * 給 Elastic 的中文狀態，加上和最近那一列的距離差，例如「中列 打在板上 +0.05m」、「中列 太遠 +0.42m」。
+   * 距離差只能告訴你離牆太遠或太近；沿牆往哪邊走要靠前進找洞（Luna 只有一個點，看不出洞在左還右）。
+   */
   public String getBeamText() {
+    return beamText(beam, horizontal);
+  }
+
+  static String beamText(Beam beam, double horizontalMeters) {
+    double err = distanceErrorMeters(horizontalMeters);
+    String row = Double.isNaN(err) ? "" : kRowNames[nearestRow(beamHeightAtBoard(horizontalMeters))] + " ";
+    String delta = Double.isNaN(err) ? "" : String.format(java.util.Locale.ROOT, " %+.2fm", err);
     return switch (beam) {
       case NO_DATA -> "沒資料";
-      case BOARD -> "打在板上";
-      case THROUGH_HOLE -> "穿過洞";
-      case BLOCKED -> "被擋住";
-      case OUT_OF_RANGE -> "超出範圍";
       case DISABLED -> "停用";
+      case BOARD -> row + "打在板上" + delta;
+      case THROUGH_HOLE -> row + "穿過洞" + delta;
+      case BLOCKED -> row + "被擋住" + delta;
+      case OUT_OF_RANGE -> Double.isNaN(err) ? "沒有牆距" : row + (err > 0 ? "太遠" : "太近") + delta;
     };
   }
 
@@ -160,6 +221,16 @@ public class TurretLidar extends SubsystemBase {
 
   public Beam getBeam() {
     return beam;
+  }
+
+  /** 光束穿過洞（已 debounce，不看距離範圍）。自動對準用。 */
+  public boolean isRawThroughHole() {
+    return rawThroughHole;
+  }
+
+  /** 啟用、有連線：自動流程可以用它找洞。 */
+  public boolean isUsable() {
+    return enabled.get() && inputs.connected;
   }
 
   /** 有連線且讀值可信（範圍與訊號強度門檻和左右兩顆 TF-Luna 相同）。 */

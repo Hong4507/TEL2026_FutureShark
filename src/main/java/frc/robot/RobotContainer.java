@@ -16,6 +16,7 @@ import frc.FSLib.rangefinder.RangeSensors;
 import frc.robot.Constants.FieldConstants;
 import frc.robot.Constants.RobotMode;
 import frc.robot.commands.AutoRoutines;
+import frc.robot.commands.AutoRoutines.AutoMethod;
 import frc.robot.commands.AutoRoutines.Half;
 import frc.robot.commands.AutoRoutines.Plan;
 import frc.robot.commands.AutoRoutines.StartSide;
@@ -45,6 +46,7 @@ import frc.robot.subsystems.turret.TurretSim;
 import frc.robot.subsystems.turretlidar.TurretLidar;
 import frc.robot.subsystems.turretlidar.TurretLidarIO;
 import frc.robot.subsystems.turretlidar.TurretLidarIONT;
+import frc.robot.subsystems.turretlidar.TurretLidarIOSim;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.subsystems.vision.VisionIO;
 import frc.robot.subsystems.vision.VisionIONT;
@@ -69,6 +71,8 @@ public class RobotContainer {
   private final LoggedNetworkChooser<Boolean> autoPathChooser = new LoggedNetworkChooser<>("Auto Path");
   /** §8.8：沒亮燈時打哪一欄（己方欄 = 起點那一側）。 */
   private final LoggedNetworkChooser<TargetColumn> autoColumnChooser = new LoggedNetworkChooser<>("Auto Column");
+  /** 11/15：砲台 Luna 找洞（不用視覺，預設）或原本的視覺流程。 */
+  private final LoggedNetworkChooser<AutoMethod> autoMethodChooser = new LoggedNetworkChooser<>("Auto Method");
 
   /** 自動選項：哪個半場（記分板用來決定每格上限）+ 起點。half == null 代表還沒選（READY 燈不會亮）。 */
   private record AutoOption(Half half, StartSide side) {
@@ -87,7 +91,10 @@ public class RobotContainer {
         drive = new Drive(new DriveIOSpark(), new GyroIOOnboardIMU());
         turret = new Turret(new TurretReal());
         vision = new Vision(new VisionIONT());
-        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getWallDistanceMeters());
+        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getWallDistanceMeters(), () -> {
+          var y = RangeSensors.get().getYaw();
+          return y == null ? 0.0 : y.in(org.wpilib.units.Units.Radians) - Math.PI / 2;
+        });
         break;
       
       case kSim:
@@ -97,8 +104,13 @@ public class RobotContainer {
         vision = "nt".equalsIgnoreCase(System.getenv("VISION_IO"))
             ? new Vision(new VisionIONT())
             : new Vision(new VisionIOSim(drive::getPose));
-        // 模擬沒有這顆感測器；用 NT 版本，可以拿 Jetson 或假的 publisher 測
-        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getWallDistanceMeters());
+        // 預設用模擬光束（依位置算有沒有穿過洞）；環境變數 TURRET_LIDAR_IO=nt → 讀 NT（Jetson／假 publisher）
+        turretLidar = new TurretLidar(
+            "nt".equalsIgnoreCase(System.getenv("TURRET_LIDAR_IO")) ? new TurretLidarIONT() : new TurretLidarIOSim(drive::getPose),
+            () -> RangeSensors.get().getWallDistanceMeters(), () -> {
+          var y = RangeSensors.get().getYaw();
+          return y == null ? 0.0 : y.in(org.wpilib.units.Units.Radians) - Math.PI / 2;
+        });
         break;
 
       default:
@@ -130,6 +142,8 @@ public class RobotContainer {
     autoPathChooser.add("不跑路徑（擺在目標欄前）", false);
     autoColumnChooser.addDefault("中欄", TargetColumn.MID);
     autoColumnChooser.add("己方欄（起點那一側）", TargetColumn.OWN_SIDE);
+    autoMethodChooser.addDefault("砲台Luna找洞（不用視覺）", AutoMethod.LUNA);
+    autoMethodChooser.add("視覺（加分洞＋VisionAlign）", AutoMethod.VISION);
     scoreboard = new Scoreboard(turret, vision, () -> currentPlan().half());
     // 開機就給 Auto/Stage 一個值，Elastic 的「Auto 階段」才不會是空的
     Logger.recordOutput("Auto/Stage", "Idle");
@@ -278,7 +292,7 @@ public class RobotContainer {
 
   /** 依選單產生新的自動流程指令（同一個指令物件不能重複組合，所以每次都重建）。 */
   private Command buildAuto() {
-    return AutoRoutines.bonusThenColumn(drive, vision, turret, currentPlan());
+    return AutoRoutines.build(drive, vision, turret, turretLidar, currentPlan());
   }
 
   /**
@@ -287,13 +301,14 @@ public class RobotContainer {
    */
   private Plan currentPlan() {
     AutoOption option = autoChooser.get();
+    AutoMethod method = autoMethodChooser.get() == null ? AutoMethod.LUNA : autoMethodChooser.get();
     if (option == null || !option.selected()) {
-      return new Plan(Half.FIRST, StartSide.RIGHT, false, TargetColumn.MID);
+      return new Plan(Half.FIRST, StartSide.RIGHT, false, TargetColumn.MID, method);
     }
     Boolean runPath = autoPathChooser.get();
     TargetColumn column = autoColumnChooser.get();
     return new Plan(option.half(), option.side(), runPath == null || runPath,
-        column == null ? TargetColumn.MID : column);
+        column == null ? TargetColumn.MID : column, method);
   }
 
   /** 只有在 DS 進 autonomous 模式時才會用到（目前用 FlySky 開關 + MockDS 的 teleop 啟動，不會進這裡）。 */

@@ -14,6 +14,7 @@ public class ColumnShot extends Command {
   private final int targetFiredCount;
   /** 結束時要不要停飛輪。自動流程中 false（§8.6：每發轉速一樣，停了再加速沒好處），流程結束才停。 */
   private final boolean stopFlywheelAtEnd;
+  private final java.util.function.DoubleSupplier distanceOverride;
 
   private final Timer reloadTimer = new Timer();
   private int tureFiredCount = 0;
@@ -28,6 +29,15 @@ public class ColumnShot extends Command {
   }
 
   public ColumnShot(Turret turret, double targetHeightMeters, int targetFireCount, boolean stopFlywheelAtEnd) {
+    this(turret, targetHeightMeters, targetFireCount, stopFlywheelAtEnd, null);
+  }
+
+  /**
+   * @param distanceOverride 不是 null 時用它當插值表距離（例如原地轉找洞後斜著射，距離 = 正對時距離 / cos(轉角)）
+   */
+  public ColumnShot(Turret turret, double targetHeightMeters, int targetFireCount, boolean stopFlywheelAtEnd,
+      java.util.function.DoubleSupplier distanceOverride) {
+    this.distanceOverride = distanceOverride;
     this.stopFlywheelAtEnd = stopFlywheelAtEnd;
     this.turret = turret;
     this.targetHeightMeters = targetHeightMeters;
@@ -44,7 +54,7 @@ public class ColumnShot extends Command {
 
   @Override
   public void execute() {
-    double distance = rangeSensor.getTargetDistance();
+    double distance = distanceOverride != null ? distanceOverride.getAsDouble() : rangeSensor.getTargetDistance();
     pitch = ShotTable.pitchRad(targetHeightMeters, distance); // 查表（表空著時 = 原本的彈道公式）
     turret.setVelocity(targetVelocity, targetVelocity * 0.8);
     turret.setPitch(pitch);

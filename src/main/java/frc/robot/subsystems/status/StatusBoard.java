@@ -159,8 +159,11 @@ public class StatusBoard extends SubsystemBase {
     AutoRoutines.Plan plan = autoPlan.get();
     Logger.recordOutput("Status/AutoSide", plan == null ? "未選" : plan.side().label);
     Logger.recordOutput("Status/AutoHalf", plan == null ? "未選" : plan.halfLabel());
-    Logger.recordOutput("Status/AutoColumn", plan == null ? "未選" : plan.column().label);
-    Logger.recordOutput("Status/AutoPath", plan == null ? "未選" : plan.runPath() ? "跑路徑" : "不跑路徑");
+    Logger.recordOutput("Status/AutoColumn", plan == null ? "未選"
+        : plan.method() == AutoRoutines.AutoMethod.LUNA ? "第一個洞" : plan.column().label);
+    Logger.recordOutput("Status/AutoPath", plan == null ? "未選"
+        : plan.method() == AutoRoutines.AutoMethod.LUNA ? (plan.side() == AutoRoutines.StartSide.RIGHT ? "Luna往車頭找" : "Luna往車尾找")
+        : plan.runPath() ? "跑路徑" : "不跑路徑");
     Logger.recordOutput("Status/AutoSummary", plan == null ? "⚠ Auto 未選" : plan.describe());
 
     // ---- READY 燈（§8.9）----

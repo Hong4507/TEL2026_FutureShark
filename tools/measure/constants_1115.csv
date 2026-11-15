@@ -8,7 +8,7 @@ kLunaTrimMeters,0,m,機器人擺正時讀 NT RangeSensor/RawFrameDiffMeters
 kEncoderMagnetOffsetRot,0.230469,rot,砲台放最低點讀 Turret/PitchEncoderAbsRot，填它的負值
 kRangeReference,GRID_WALL,,GRID_WALL（量九宮格牆）或 LOW_WALL（黑板讀不到時改量矮牆）
 kTurretLunaHeightMeters,0.48029,m,砲台 Luna 鏡頭離地高度
-kTurretLunaPitchDeg,30,deg,砲台 Luna 光束仰角（往上為正）
+kTurretLunaPitchDeg,23,deg,砲台 Luna 光束仰角（往上為正）= 90 − 67（和鉛直線夾角）
 kTurretLunaForwardOfShooterMeters,0.15880,m,砲台 Luna 在 DownShooter 輪心前方（朝九宮格）多少
 kCameraHeightMeters,0.46459,m,Limelight 鏡頭離地高度（只用在模擬）
 kCameraBehindShooterMeters,0.16165,m,Limelight 比 DownShooter 輪心離九宮格遠多少 = (10.73 + 320.45) − 169.53 mm

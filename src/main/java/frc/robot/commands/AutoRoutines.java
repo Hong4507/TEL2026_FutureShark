@@ -2,6 +2,8 @@ package frc.robot.commands;
 
 import static frc.robot.Constants.FieldConstants.*;
 
+import java.util.function.DoubleSupplier;
+
 import org.littletonrobotics.junction.Logger;
 import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
 import org.wpilib.command2.Command;
@@ -10,11 +12,14 @@ import org.wpilib.command2.Commands;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 
 import frc.FSLib.rangefinder.RangeSensors;
+import frc.robot.commands.drive.LidarHoleAlign;
+import frc.robot.commands.drive.LidarTurnScan;
 import frc.robot.commands.drive.VisionAlign;
 import frc.robot.commands.turret.ColumnShot;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.turret.Turret;
 import frc.robot.subsystems.turret.TurretConstants;
+import frc.robot.subsystems.turretlidar.TurretLidar;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.subsystems.vision.Vision.Column;
 
@@ -105,7 +110,30 @@ public final class AutoRoutines {
    *
    * @param runPath false = 不跑路徑（§8.7）：機器人直接擺在目標欄前面，只做 VisionAlign＋射擊。
    */
-  public record Plan(Half half, StartSide side, boolean runPath, TargetColumn column) {
+  /** 自動流程用哪一種方式對準欄。 */
+  public enum AutoMethod {
+    /** 往前走、用砲台 TF-Luna 找洞（不用視覺）；被擋住就原地轉找洞。 */
+    LUNA("砲台Luna找洞"),
+    /** 原本的視覺流程（加分洞＋VisionAlign）。 */
+    VISION("視覺");
+
+    public final String label;
+
+    AutoMethod(String label) {
+      this.label = label;
+    }
+  }
+
+  public record Plan(Half half, StartSide side, boolean runPath, TargetColumn column, AutoMethod method) {
+    public Plan(Half half, StartSide side, boolean runPath, TargetColumn column) {
+      this(half, side, runPath, column, AutoMethod.VISION);
+    }
+
+    /** 砲台 Luna 找洞的方向：右起點往車頭（+1）、左起點往車尾（-1），兩邊都是往中欄走。 */
+    public double lunaDirection() {
+      return side == StartSide.RIGHT ? 1 : -1;
+    }
+
     public Column fallbackColumn() {
       return column == TargetColumn.MID ? Column.MID : side.ownColumn;
     }
@@ -115,8 +143,69 @@ public final class AutoRoutines {
     }
 
     public String describe() {
+      if (method == AutoMethod.LUNA) return halfLabel() + "・" + side.label + "・" + method.label;
       return halfLabel() + "・" + side.label + "・" + (runPath ? "跑路徑" : "不跑路徑") + "・" + column.label;
     }
+  }
+
+  /** 依 {@link Plan#method()} 產生自動流程。 */
+  public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Plan plan) {
+    return plan.method() == AutoMethod.LUNA
+        ? lunaColumn(drive, turret, turretLidar, plan)
+        : bonusThenColumn(drive, vision, turret, plan);
+  }
+
+  /**
+   * 不用視覺的自動流程（11/15 隊員指定）：
+   * <ol>
+   *   <li>飛輪開始轉＋往前走 {@code /Tuning/LunaAuto/ApproachMeters}，再慢慢走直到砲台 Luna 穿過洞、停在洞中間（{@link LidarHoleAlign}）。</li>
+   *   <li>找到 → 低／中／高各射 {@link Half#ballsPerHole()} 發（上半場預設 3）。</li>
+   *   <li>走不動（被對手擋住）或走完沒找到 → 原地轉找洞（{@link LidarTurnScan}），找到才射，距離用 正對距離 / cos(轉角)。</li>
+   *   <li>砲台 Luna 停用或斷線 → 只走 ApproachMeters，原地直接射（等於人工擺位）。</li>
+   * </ol>
+   * 方向由起點決定（{@link Plan#lunaDirection()}）。
+   */
+  public static Command lunaColumn(Drive drive, Turret turret, TurretLidar turretLidar, Plan plan) {
+    int perHole = plan.half().ballsPerHole();
+    double dir = plan.lunaDirection();
+    Logger.recordOutput("Auto/BallsPerHole", perHole);
+    Logger.recordOutput("Auto/Plan", plan.describe());
+    LidarHoleAlign align = new LidarHoleAlign(drive, turretLidar, dir);
+    LidarTurnScan scan = new LidarTurnScan(drive, turretLidar, dir);
+    double[] squareDistance = {Double.NaN};
+    DoubleSupplier slanted = () -> squareDistance[0] / Math.max(Math.cos(scan.turnedRad()), 0.5);
+    return Commands.sequence(
+      log("Luna-Approach"),
+      Commands.parallel(Commands.runOnce(() -> spinUp(turret)), align),
+      Commands.either(
+        Commands.sequence(log("Luna-Shoot"), columnShots(turret, perHole, null)),
+        Commands.either(
+          Commands.sequence(log("Luna-Unavailable-Shoot"), columnShots(turret, perHole, null)),
+          Commands.sequence(
+            log("Luna-TurnScan"),
+            Commands.runOnce(() -> squareDistance[0] = RangeSensors.get().getTargetDistance()),
+            scan,
+            Commands.either(
+              Commands.sequence(log("Luna-ScanShoot"), columnShots(turret, perHole, slanted)),
+              log("Luna-NoHole"),
+              scan::found)
+          ),
+          () -> align.result() == LidarHoleAlign.Result.UNAVAILABLE),
+        align::found),
+      log("Done")
+    ).finallyDo(() -> {
+      turret.setVelocity(0);
+      turret.setTrigger(0);
+    }).withName("Auto-" + plan.describe());
+  }
+
+  /** 低、中、高各 count 發，飛輪不停。 */
+  private static Command columnShots(Turret turret, int count, DoubleSupplier distance) {
+    return Commands.sequence(
+      new ColumnShot(turret, kLowTargetHeight, count, false, distance),
+      new ColumnShot(turret, kMidTargetHeight, count, false, distance),
+      new ColumnShot(turret, kHighTargetHeight, count, false, distance)
+    );
   }
 
   /** 舊介面：跑 PathPlanner 路徑、沒亮燈打中欄。 */
