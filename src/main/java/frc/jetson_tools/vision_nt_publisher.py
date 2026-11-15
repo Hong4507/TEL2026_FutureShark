@@ -15,7 +15,14 @@ NT 表 Vision（格式必須和 robot/subsystems/vision/VisionConstants.java 一
 用法：
   python vision_nt_publisher.py --model best.engine --calib camera_calib.yaml --team 7130
   python vision_nt_publisher.py --model best.engine --calib camera_calib.yaml --print-only   # 不連 NT
-  python vision_nt_publisher.py ... --save-dir captures --save-every 2   # 每 2 秒存一張原始畫面（收訓練資料）
+  python vision_nt_publisher.py ... --record                 # 存圖模式：每秒 2.5 張原始畫面 → ~/captures/YYYYMMDD/HHMMSS_mmm.jpg
+  python vision_nt_publisher.py ... --record --record-fps 3  # 也可以不加 --record，改在 NT /Vision/Record 設 true
+
+存圖模式（Robot-Brief §8.10，收 YOLO 訓練資料）：
+  開關     --record 或 NT /Vision/Record（boolean，預設 false），任一個開著就存
+  輸出     /Vision/Recording（boolean）、/Vision/RecordCount（本次開機存了幾張）、/Vision/RecordFreeGB、
+           /Vision/RecordStatus（給 Elastic 的文字）、/Vision/RecordStopReason
+  保護     剩餘空間 < --record-min-free-gb（5 GB）自動停止；另一個執行緒寫檔，佇列滿就丟幀，不拖慢偵測
 
 即時畫面（畫好框）：瀏覽器開 http://<Jetson IP>:1181/ ，--stream-port 0 關閉。
 """
@@ -219,6 +226,91 @@ class MjpegServer:
                 self.cond.notify_all()
 
 
+class Recorder:
+    """存圖模式：主迴圈只把原始畫面丟進佇列（不複製、不編碼），另一個執行緒負責 JPEG 編碼和寫檔。
+
+    佇列滿（磁碟太慢）就直接丟掉這一張，偵測迴圈永遠不會等存圖。
+    """
+
+    def __init__(self, root, fps, quality=90, min_free_gb=5.0, queue_size=4):
+        import queue
+
+        self.root = os.path.expanduser(root)
+        self.period = 1.0 / fps if fps > 0 else float("inf")
+        self.quality = quality
+        self.min_free_gb = min_free_gb
+        self.queue = queue.Queue(maxsize=queue_size)
+        self.count = 0
+        self.dropped = 0
+        self.errors = 0
+        self.stop_reason = ""
+        self.free_gb = self._free_gb()
+        self.last_offer = 0.0
+        self.last_free_check = 0.0
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _free_gb(self):
+        path = self.root
+        while not os.path.exists(path):
+            parent = os.path.dirname(path)
+            if parent == path:
+                break
+            path = parent
+        st = os.statvfs(path)
+        return st.f_bavail * st.f_frsize / 1e9
+
+    def offer(self, frame, now, enabled):
+        """主迴圈每張畫面呼叫一次；到時間才丟進佇列。回傳 (是否錄影中, 狀態文字)。"""
+        import queue
+
+        if now - self.last_free_check >= 2.0:
+            self.last_free_check = now
+            try:
+                self.free_gb = self._free_gb()
+            except OSError:
+                pass
+        if not enabled:
+            return False
+        if self.free_gb < self.min_free_gb:
+            if not self.stop_reason:
+                self.stop_reason = f"剩餘空間 {self.free_gb:.1f} GB < {self.min_free_gb:.0f} GB"
+                print(f"⚠️ 停止存圖：{self.stop_reason}")
+            return False
+        self.stop_reason = ""
+        if now - self.last_offer < self.period:
+            return True
+        self.last_offer = now
+        try:
+            # LatestFrame 每張都是新的 ndarray、不會被改寫，所以不用 copy
+            self.queue.put_nowait((frame, datetime.now()))
+        except queue.Full:
+            self.dropped += 1
+        return True
+
+    def _run(self):
+        while True:
+            frame, stamp = self.queue.get()
+            folder = os.path.join(self.root, stamp.strftime("%Y%m%d"))
+            path = os.path.join(folder, stamp.strftime("%H%M%S_") + f"{stamp.microsecond // 1000:03d}.jpg")
+            try:
+                os.makedirs(folder, exist_ok=True)
+                if cv2.imwrite(path, frame, [cv2.IMWRITE_JPEG_QUALITY, self.quality]):
+                    self.count += 1
+                else:
+                    self.errors += 1
+            except OSError as e:
+                self.errors += 1
+                if self.errors <= 3:
+                    print(f"⚠️ 存圖失敗：{e}")
+
+    def status_text(self, recording):
+        if self.stop_reason:
+            return f"停止：空間不足 {self.free_gb:.0f}GB"
+        if recording:
+            return f"● 錄影 {self.count} 張"
+        return f"未錄影（{self.count} 張）"
+
+
 def draw(frame, dets, fps):
     img = frame.copy()
     for cls, box, conf, lit in dets:
@@ -247,8 +339,13 @@ def main():
     parser.add_argument("--server", default=None)
     parser.add_argument("--print-only", action="store_true", help="不連 NT，只印結果")
     parser.add_argument("--stream-port", type=int, default=1181)
-    parser.add_argument("--save-dir", default=None, help="定時存原始畫面的資料夾（收訓練資料用）")
-    parser.add_argument("--save-every", type=float, default=2.0, help="幾秒存一張")
+    parser.add_argument("--save-dir", default=None, help="（舊）定時存原始畫面的資料夾；建議改用 --record")
+    parser.add_argument("--save-every", type=float, default=2.0, help="（舊）幾秒存一張")
+    parser.add_argument("--record", action="store_true", help="一開始就開存圖模式（NT /Vision/Record 也能開）")
+    parser.add_argument("--record-fps", type=float, default=2.5, help="存圖模式每秒幾張")
+    parser.add_argument("--record-dir", default="~/captures", help="存圖根目錄（底下自動分 YYYYMMDD 資料夾）")
+    parser.add_argument("--record-quality", type=int, default=90, help="JPEG 品質")
+    parser.add_argument("--record-min-free-gb", type=float, default=5.0, help="剩餘空間低於這個值就停止存圖")
     add_lock_args(parser)
     args = parser.parse_args()
 
@@ -300,8 +397,24 @@ def main():
             "latencyMs": table.getDoubleTopic("latencyMs").publish(opts),
             "fps": table.getDoubleTopic("fps").publish(opts),
             "model": table.getStringTopic("model").publish(),
+            "recording": table.getBooleanTopic("Recording").publish(),
+            "recordCount": table.getIntegerTopic("RecordCount").publish(),
+            "recordFreeGB": table.getDoubleTopic("RecordFreeGB").publish(),
+            "recordStatus": table.getStringTopic("RecordStatus").publish(),
+            "recordStopReason": table.getStringTopic("RecordStopReason").publish(),
         }
         pubs["model"].set(os.path.basename(args.model))
+        # /Vision/Record：Elastic 或 OutlineViewer 設 true 就開始存圖。publish 預設值讓它出現在 NT 上可以直接改
+        record_topic = table.getBooleanTopic("Record")
+        record_pub = record_topic.publish(ntcore.PubSubOptions(keepDuplicates=True))
+        record_topic.setRetained(True)
+        record_pub.setDefault(False)
+        record_sub = record_topic.subscribe(False)
+
+    recorder = Recorder(args.record_dir, args.record_fps, args.record_quality, args.record_min_free_gb)
+    print(f"存圖：{'開' if args.record else '關（NT /Vision/Record 可開）'}，{args.record_fps} 張/秒 → "
+          f"{recorder.root}，剩餘 {recorder.free_gb:.1f} GB")
+    last_record_pub = 0.0
 
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
@@ -354,6 +467,16 @@ def main():
                 pubs["heartbeat"].set(heartbeat)  # 最後才更新 heartbeat，機器人看到新值時其他欄位已經是新的
                 inst.flush()  # 馬上送出，不等 periodic
 
+            record_on = args.record or (pubs is not None and record_sub.get())
+            recording = recorder.offer(frame, now, record_on)
+            if pubs and now - last_record_pub >= 0.5:
+                last_record_pub = now
+                pubs["recording"].set(recording)
+                pubs["recordCount"].set(recorder.count)
+                pubs["recordFreeGB"].set(round(recorder.free_gb, 2))
+                pubs["recordStatus"].set(recorder.status_text(recording))
+                pubs["recordStopReason"].set(recorder.stop_reason)
+
             if stream and stream.wants_frame():
                 stream.publish(draw(frame, dets, fps))
             if args.save_dir and now - last_save >= args.save_every:
@@ -364,7 +487,8 @@ def main():
                 last_print = now
                 n_hole = sum(1 for d in dets if d[0] == CLASS_HOLE)
                 lits = [f"{d[3]:.2f}" for d in dets if d[0] == CLASS_BONUS]
-                print(f"{fps:5.1f} fps  延遲 {latency_ms:5.1f} ms  大洞 {n_hole}  加分洞亮燈分數 {lits}")
+                rec = f"  存圖 {recorder.count} 張（丟 {recorder.dropped}）" if record_on else ""
+                print(f"{fps:5.1f} fps  延遲 {latency_ms:5.1f} ms  大洞 {n_hole}  加分洞亮燈分數 {lits}{rec}")
     except KeyboardInterrupt:
         pass
     finally:

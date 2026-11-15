@@ -3,6 +3,10 @@ package frc.FSLib.rangefinder;
 import static org.wpilib.units.Units.Radians;
 import static frc.FSLib.rangefinder.RangeSensorConstants.*;
 
+import frc.FSLib.rangefinder.RangeSensorConstants.RangeReference;
+
+import java.util.OptionalDouble;
+
 import org.littletonrobotics.junction.Logger;
 
 import org.wpilib.hardware.bus.I2C;
@@ -10,7 +14,8 @@ import org.wpilib.system.Timer;
 import org.wpilib.units.measure.Angle;
 
 /**
- * 兩顆 TF-Luna 左右並排、朝正前方，直接接在 SystemCore 的 I2C 埠。
+ * 兩顆 TF-Luna 沿車身前後裝（左 Luna 靠車頭 {@code kBaselineMeters}），光束朝機器人右側（和射球同方向），
+ * 直接接在 SystemCore 的 I2C 埠。量哪一面牆由 {@link RangeSensorConstants#kRangeReference} 決定（§8.1／§8.2）。
  *
  * <p>TF-Luna 必須是 I2C 模式：第 5 腳（CFG）接 GND 後上電。預設位址 0x10。
  * 兩顆接在不同 I2C 埠時可以都用 0x10；接在同一個埠時，必須先把其中一顆改成別的位址
@@ -29,6 +34,10 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
 
   private Reading cached;
   private double cachedTime = Double.NEGATIVE_INFINITY;
+  private Solution solution = new Solution(kFallbackDistanceMeters, Double.NaN, Double.NaN, false);
+
+  private final TimedMovingAverage leftFilter = new TimedMovingAverage(kLunaFilterSec);
+  private final TimedMovingAverage rightFilter = new TimedMovingAverage(kLunaFilterSec);
 
   public DualTFLunaRangeSensor(I2C.Port leftPort, int leftAddress, I2C.Port rightPort, int rightAddress) {
     if (leftPort == rightPort && leftAddress == rightAddress) {
@@ -92,16 +101,66 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
     }
   }
 
-  /** 一次讀取的結果。 */
-  private record Reading(double left, double right, boolean leftValid, boolean rightValid) {
-    boolean bothValid() {
-      return leftValid && rightValid;
-    }
+  /** 一次讀取的結果（距離已濾波）。 */
+  private record Reading(double left, double right, boolean leftValid, boolean rightValid) {}
 
-    /** 相對牆面的傾角（rad），右邊比較遠為正。 */
-    double tiltRad() {
-      return Math.atan2(right - left, kBaselineMeters);
+  /** 公式計算結果。yawRad 是相對正對牆面的偏差（0 = 正對，已乘 kYawSign）；單邊或都無效時 NaN。 */
+  public record Solution(double targetDistance, double wallDistance, double yawRad, boolean valid) {}
+
+  /** 依 {@link RangeSensorConstants#kRangeReference} 算距離與角度。純計算，單元測試用這個。 */
+  public static Solution solve(double leftMeters, double rightMeters, boolean leftValid, boolean rightValid) {
+    return solve(kRangeReference, leftMeters, rightMeters, leftValid, rightValid);
+  }
+
+  public static Solution solve(RangeReference reference, double leftMeters, double rightMeters,
+      boolean leftValid, boolean rightValid) {
+    return reference == RangeReference.LOW_WALL
+        ? solveLowWall(leftMeters, rightMeters, leftValid, rightValid)
+        : solveGridWall(leftMeters, rightMeters, leftValid, rightValid);
+  }
+
+  /**
+   * GRID_WALL（Robot-Brief §8.1）：
+   * <pre>
+   * dR_frame  = dR − kRightLunaInboardMeters
+   * dL_frame  = dL − kLeftLunaInboardMeters − kLunaTrimMeters
+   * yaw       = atan2(dL_frame − dR_frame, kBaselineMeters) × kYawSign
+   * wall_dist = (dL_frame + dR_frame) / 2 × cos(yaw)        // 右 frame 到九宮格牆
+   * TargetDistance = wall_dist + kShooterInboardMeters
+   * </pre>
+   * 只有一邊有效：wall_dist = 那一邊的 d_frame（不算角度）。都無效：kFallbackDistanceMeters。
+   */
+  static Solution solveGridWall(double dL, double dR, boolean leftValid, boolean rightValid) {
+    double dLFrame = dL - kLeftLunaInboardMeters - kLunaTrimMeters;
+    double dRFrame = dR - kRightLunaInboardMeters;
+    if (leftValid && rightValid) {
+      double yaw = Math.atan2(dLFrame - dRFrame, kBaselineMeters) * kYawSign;
+      double wall = (dLFrame + dRFrame) / 2 * Math.cos(yaw);
+      return new Solution(wall + kShooterInboardMeters, wall, yaw, true);
     }
+    if (leftValid) return new Solution(dLFrame + kShooterInboardMeters, dLFrame, Double.NaN, true);
+    if (rightValid) return new Solution(dRFrame + kShooterInboardMeters, dRFrame, Double.NaN, true);
+    return new Solution(kFallbackDistanceMeters, Double.NaN, Double.NaN, false);
+  }
+
+  /**
+   * LOW_WALL（Robot-Brief §8.2 備案）：舊公式。kLowWall* 用預設值時和 11/14 版本算出來完全一樣。
+   * wallDistance 回傳「右 frame 到九宮格牆」= TargetDistance − kSensorOffsetMeters（給砲台 Luna 用）。
+   */
+  static Solution solveLowWall(double l, double r, boolean leftValid, boolean rightValid) {
+    double left = l - kLowWallLeftInboardMeters;
+    double right = r - kLowWallRightInboardMeters;
+    if (leftValid && rightValid) {
+      double tilt = Math.atan2(right - left, kLowWallBaselineMeters);
+      double perpendicular = (left + right) / 2 * Math.cos(tilt);
+      double distance = perpendicular + kWallToTargetMeters / Math.cos(tilt) + kSensorOffsetMeters;
+      return new Solution(distance, distance - kSensorOffsetMeters, tilt * kLowWallYawSign, true);
+    }
+    if (leftValid || rightValid) {
+      double distance = (leftValid ? left : right) + kWallToTargetMeters + kSensorOffsetMeters;
+      return new Solution(distance, distance - kSensorOffsetMeters, Double.NaN, true);
+    }
+    return new Solution(kFallbackDistanceMeters, Double.NaN, Double.NaN, false);
   }
 
   private Reading read() {
@@ -113,11 +172,26 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
     right.update();
     boolean lValid = left.isValid();
     boolean rValid = right.isValid();
+    double l = leftFilter.calculate(now, left.distanceMeters, lValid);
+    double r = rightFilter.calculate(now, right.distanceMeters, rValid);
     Logger.recordOutput("RangeSensor/TFLuna/LeftValid", lValid);
     Logger.recordOutput("RangeSensor/TFLuna/RightValid", rValid);
+    Logger.recordOutput("RangeSensor/TFLuna/LeftFilteredMeters", l);
+    Logger.recordOutput("RangeSensor/TFLuna/RightFilteredMeters", r);
+    // §8.2：開機第一件事看這兩個（黑板 Amp 太低 → 讀值 0 → 切 LOW_WALL）
+    Logger.recordOutput("RangeSensor/LeftAmp", left.strength);
+    Logger.recordOutput("RangeSensor/RightAmp", right.strength);
+    // 擺正時這個值 = kLunaTrimMeters 要填的數字
+    Logger.recordOutput("RangeSensor/RawFrameDiffMeters",
+        (l - kLeftLunaInboardMeters) - (r - kRightLunaInboardMeters));
 
-    cached = new Reading(left.distanceMeters, right.distanceMeters, lValid, rValid);
+    cached = new Reading(l, r, lValid, rValid);
     cachedTime = now;
+    solution = solve(l, r, lValid, rValid);
+    Logger.recordOutput("RangeSensor/Reference", kRangeReference.name());
+    Logger.recordOutput("RangeSensor/TargetDistance", solution.targetDistance());
+    Logger.recordOutput("RangeSensor/WallDistance", solution.wallDistance());
+    Logger.recordOutput("RangeSensor/YawErrorDeg", Math.toDegrees(solution.yawRad()));
     return cached;
   }
 
@@ -134,39 +208,34 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
 
   @Override
   public double getTargetDistance() {
-    Reading reading = read();
-    double distance;
-    if (reading.bothValid()) {
-      double tilt = reading.tiltRad();
-      double perpendicular = (reading.left() + reading.right()) / 2 * Math.cos(tilt);
-      distance = perpendicular + kWallToTargetMeters / Math.cos(tilt) + kSensorOffsetMeters;
-      Logger.recordOutput("RangeSensor/TFLuna/TiltRad", tilt);
-    } else if (reading.leftValid()) {
-      distance = reading.left() + kWallToTargetMeters + kSensorOffsetMeters;
-    } else if (reading.rightValid()) {
-      distance = reading.right() + kWallToTargetMeters + kSensorOffsetMeters;
-    } else {
-      distance = kFallbackDistanceMeters;
-    }
-    Logger.recordOutput("RangeSensor/TargetDistance", distance);
-    return distance;
+    read();
+    return solution.targetDistance();
+  }
+
+  @Override
+  public OptionalDouble getWallDistanceMeters() {
+    read();
+    return solution.valid() ? OptionalDouble.of(solution.wallDistance()) : OptionalDouble.empty();
   }
 
   /**
-   * 左右兩顆的距離 → 偏航角（rad，π/2 = 正對牆面）。純計算，模擬測試也用這個。
-   * 方向由 {@link RangeSensorConstants#kYawSign} 決定。
+   * 左右兩顆的原始距離 → 偏航角（rad，π/2 = 正對牆面），依目前的 kRangeReference。純計算，模擬測試也用這個。
    */
   public static double yawRad(double leftMeters, double rightMeters) {
-    return Math.PI / 2 + kYawSign * Math.atan2(rightMeters - leftMeters, kBaselineMeters);
+    return yawRad(kRangeReference, leftMeters, rightMeters);
+  }
+
+  public static double yawRad(RangeReference reference, double leftMeters, double rightMeters) {
+    return Math.PI / 2 + solve(reference, leftMeters, rightMeters, true, true).yawRad();
   }
 
   @Override
   public Angle getYaw() {
-    Reading reading = read();
-    if (!reading.bothValid()) {
+    read();
+    if (Double.isNaN(solution.yawRad())) {
       return null;
     }
-    double yaw = yawRad(reading.left(), reading.right());
+    double yaw = Math.PI / 2 + solution.yawRad();
     Logger.recordOutput("RangeSensor/YawRad", yaw);
     return Radians.of(yaw);
   }

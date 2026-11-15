@@ -1,0 +1,14 @@
+name,value,unit,note
+kShooterInboardMeters,,m,射球點在右 frame 內側多少（暫定 0.25）
+kYawSign,,,LaserAlign 越轉越歪（LaserAlign/WrongDirection）就填 -1，正常填 1
+kLunaTrimMeters,,m,機器人擺正時讀 NT RangeSensor/RawFrameDiffMeters
+kEncoderMagnetOffsetRot,,rot,砲台放最低點讀 Turret/PitchEncoderAbsRot，填它的負值
+kRangeReference,,,GRID_WALL（量九宮格牆）或 LOW_WALL（黑板讀不到時改量矮牆）
+kTurretLunaHeightMeters,,m,砲台 Luna 鏡頭離地高度
+kTurretLunaPitchDeg,,deg,砲台 Luna 光束仰角（往上為正）
+kTurretLunaInboardMeters,,m,砲台 Luna 鏡頭在右 frame 內側多少（和射球點的水平差 = 這個 − kShooterInboardMeters）
+kShooterForwardOfCameraMeters,,m,射球點在鏡頭前方多少（VisionAlign 對準後偏哪邊就調這個）
+leftLunaHeightMeters,,m,記錄用：左 Luna 離地高度（光束要在低列洞下緣約 1.0 m 以下、矮牆以上）
+rightLunaHeightMeters,,m,記錄用：右 Luna 離地高度
+lowWallHeightMeters,,m,記錄用：矮牆高度
+flywheelSpinUpSec,,s,記錄用：飛輪從 0 到 Status/ShooterReady 的時間

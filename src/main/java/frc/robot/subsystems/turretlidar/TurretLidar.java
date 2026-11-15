@@ -1,9 +1,10 @@
 package frc.robot.subsystems.turretlidar;
 
 import java.util.OptionalDouble;
-import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
 import org.littletonrobotics.junction.Logger;
+import org.littletonrobotics.junction.networktables.LoggedNetworkBoolean;
 import org.wpilib.command2.SubsystemBase;
 import org.wpilib.math.filter.Debouncer;
 
@@ -36,8 +37,15 @@ public class TurretLidar extends SubsystemBase {
   public static final double kMountHeightMeters = 0.52;
   /** 光束仰角（度，往上為正）。 */
   public static final double kMountPitchDeg = 0.0;
-  /** 鏡頭到板面的水平距離 = TargetDistance + 這個值（鏡頭比砲台射球點更靠近板子 → 負值）。 */
-  public static final double kHorizontalOffsetMeters = 0.0;
+  /**
+   * 砲台 Luna 鏡頭在右 frame 內側多少（公尺）。鏡頭到板面的水平距離 = 車身 Luna 牆距（右 frame → 九宮格）+ 這個值（§8.4）。
+   * 【待量 11/15】量到前先用 kShooterInboardMeters 的暫定值。
+   */
+  public static final double kInboardMeters = 0.25;
+  /** 光束要穿過哪一列（§8.4 定案：中列）。 */
+  public static final double kAimRowHeightMeters = FieldConstants.kMidTargetHeight;
+  /** 光束打在板上的高度離洞中心超過（洞半徑 − 這個值）就算「超出範圍」，不判斷穿洞。 */
+  public static final double kRowEdgeMarginMeters = 0.05;
 
   // ===== 判斷門檻 =====
   /** 讀值比預期板子距離遠超過這個值 → 穿過洞。 */
@@ -49,20 +57,24 @@ public class TurretLidar extends SubsystemBase {
   /** 洞的半徑（Ø40 cm），用來估光束打在哪一列。 */
   private static final double kHoleRadiusMeters = 0.20;
 
-  public enum Beam { NO_DATA, BOARD, THROUGH_HOLE, BLOCKED }
+  /** OUT_OF_RANGE：距離不在有效範圍（光束打不到目標列）或沒有牆距；DISABLED：NT 關掉了。 */
+  public enum Beam { NO_DATA, BOARD, THROUGH_HOLE, BLOCKED, OUT_OF_RANGE, DISABLED }
+
+  /** §8.4：上機測 10 分鐘，讀不到黑板就在 Elastic／NT 把這個關掉（顯示「停用」）。 */
+  private static final LoggedNetworkBoolean enabled = new LoggedNetworkBoolean("/Tuning/TurretLidar/Enabled", true);
 
   private final TurretLidarIO io;
   private final TurretLidarIOInputsAutoLogged inputs = new TurretLidarIOInputsAutoLogged();
-  /** 砲台到目標的水平距離（RangeSensor/TargetDistance）。 */
-  private final DoubleSupplier targetDistanceMeters;
+  /** 右 frame 到九宮格牆面的距離（RangeSensor/WallDistance），無效時 empty。 */
+  private final Supplier<OptionalDouble> wallDistanceMeters;
   private final Debouncer holeDebouncer = new Debouncer(kDebounceSeconds, Debouncer.DebounceType.BOTH);
 
   private Beam beam = Beam.NO_DATA;
   private boolean throughHole = false;
 
-  public TurretLidar(TurretLidarIO io, DoubleSupplier targetDistanceMeters) {
+  public TurretLidar(TurretLidarIO io, Supplier<OptionalDouble> wallDistanceMeters) {
     this.io = io;
-    this.targetDistanceMeters = targetDistanceMeters;
+    this.wallDistanceMeters = wallDistanceMeters;
   }
 
   @Override
@@ -70,10 +82,16 @@ public class TurretLidar extends SubsystemBase {
     io.updateInputs(inputs);
     Logger.processInputs("TurretLidar", inputs);
 
-    double horizontal = targetDistanceMeters.getAsDouble() + kHorizontalOffsetMeters;
+    OptionalDouble wall = wallDistanceMeters.get();
+    double horizontal = wall.isPresent() ? wall.getAsDouble() + kInboardMeters : Double.NaN;
     double expected = expectedBoardDistance(horizontal);
     double beamHeight = beamHeightAtBoard(horizontal);
-    beam = classify(inputs.connected, inputs.distanceMeters, inputs.strength, expected);
+    if (!enabled.get()) {
+      beam = Beam.DISABLED;
+    } else {
+      beam = classify(inputs.connected, inputs.distanceMeters, inputs.strength, expected);
+      if (beam != Beam.NO_DATA && !inValidRange(beamHeight)) beam = Beam.OUT_OF_RANGE;
+    }
     throughHole = holeDebouncer.calculate(beam == Beam.THROUGH_HOLE);
 
     Logger.recordOutput("TurretLidar/Valid", isValid());
@@ -92,6 +110,26 @@ public class TurretLidar extends SubsystemBase {
   /** 光束打到板面時的高度。 */
   static double beamHeightAtBoard(double horizontalMeters) {
     return kMountHeightMeters + horizontalMeters * Math.tan(Math.toRadians(kMountPitchDeg));
+  }
+
+  /**
+   * 光束打在板上的高度是否夠接近目標列的洞中心（|高度 − 列高| ≤ 洞半徑 − margin）。
+   * 換成水平距離約 ±(0.2 − 0.05) / tan(光束仰角)。NaN（沒有牆距）→ false。
+   */
+  static boolean inValidRange(double beamHeightMeters) {
+    return Math.abs(beamHeightMeters - kAimRowHeightMeters) <= kHoleRadiusMeters - kRowEdgeMarginMeters;
+  }
+
+  /** 給 Elastic 的中文狀態。 */
+  public String getBeamText() {
+    return switch (beam) {
+      case NO_DATA -> "沒資料";
+      case BOARD -> "打在板上";
+      case THROUGH_HOLE -> "穿過洞";
+      case BLOCKED -> "被擋住";
+      case OUT_OF_RANGE -> "超出範圍";
+      case DISABLED -> "停用";
+    };
   }
 
   /** 光束高度落在哪一列洞的範圍內（LOW／MID／HIGH），都不在 → NONE（這樣永遠穿不過洞，要改安裝角度）。 */

@@ -8,53 +8,68 @@
         "layouts": [],
         "containers": [
           {
-            "title": "模式",
+            "title": "READY",
             "x": 0.0,
             "y": 0.0,
-            "width": 320.0,
+            "width": 256.0,
             "height": 128.0,
-            "type": "Large Text Display",
+            "type": "Boolean Box",
             "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Status/Mode",
+              "topic": "/AdvantageKit/RealOutputs/Status/Ready",
               "period": 0.06,
-              "data_type": "string"
+              "data_type": "boolean",
+              "true_color": 4283215696,
+              "false_color": 4294198070
             }
           },
           {
-            "title": "飛輪",
-            "x": 320.0,
+            "title": "起點",
+            "x": 256.0,
             "y": 0.0,
             "width": 256.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Status/Shooter",
+              "topic": "/AdvantageKit/RealOutputs/Status/AutoSide",
               "period": 0.06,
               "data_type": "string"
             }
           },
           {
-            "title": "仰角",
-            "x": 576.0,
+            "title": "半場",
+            "x": 512.0,
             "y": 0.0,
-            "width": 320.0,
+            "width": 192.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Status/Pitch",
+              "topic": "/AdvantageKit/RealOutputs/Status/AutoHalf",
               "period": 0.06,
               "data_type": "string"
             }
           },
           {
-            "title": "射出",
+            "title": "目標欄",
+            "x": 704.0,
+            "y": 0.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/AutoColumn",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "路徑",
             "x": 896.0,
             "y": 0.0,
             "width": 192.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Status/Shots",
+              "topic": "/AdvantageKit/RealOutputs/Status/AutoPath",
               "period": 0.06,
               "data_type": "string"
             }
@@ -73,16 +88,30 @@
             }
           },
           {
-            "title": "警示",
+            "title": "警示／未就緒原因",
             "x": 0.0,
             "y": 128.0,
-            "width": 1280.0,
+            "width": 1024.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {
               "topic": "/AdvantageKit/RealOutputs/Status/Alert",
               "period": 0.06,
               "data_type": "string"
+            }
+          },
+          {
+            "title": "Auto 階段",
+            "x": 1024.0,
+            "y": 128.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Auto/Stage",
+              "period": 0.06,
+              "data_type": "string",
+              "show_submit_button": false
             }
           },
           {
@@ -236,10 +265,62 @@
             }
           },
           {
-            "title": "目標距離(左右TF-Luna)",
+            "title": "模式",
             "x": 0.0,
             "y": 384.0,
-            "width": 320.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/Mode",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "飛輪",
+            "x": 256.0,
+            "y": 384.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/Shooter",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "仰角",
+            "x": 448.0,
+            "y": 384.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/Pitch",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "射出",
+            "x": 640.0,
+            "y": 384.0,
+            "width": 128.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/Shots",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "目標距離",
+            "x": 768.0,
+            "y": 384.0,
+            "width": 192.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {
@@ -249,60 +330,30 @@
             }
           },
           {
-            "title": "砲台TF-Luna",
-            "x": 320.0,
+            "title": "砲台Luna",
+            "x": 960.0,
             "y": 384.0,
-            "width": 256.0,
+            "width": 192.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Status/TurretLidarDistance",
+              "topic": "/AdvantageKit/RealOutputs/Status/TurretLidarBeam",
               "period": 0.06,
               "data_type": "string"
             }
           },
           {
-            "title": "Auto 階段",
-            "x": 576.0,
+            "title": "Jetson錄影",
+            "x": 1152.0,
             "y": 384.0,
-            "width": 256.0,
+            "width": 128.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Auto/Stage",
+              "topic": "/Vision/RecordStatus",
               "period": 0.06,
               "data_type": "string",
               "show_submit_button": false
-            }
-          },
-          {
-            "title": "Enabled",
-            "x": 1088.0,
-            "y": 384.0,
-            "width": 192.0,
-            "height": 128.0,
-            "type": "Boolean Box",
-            "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Status/Enabled",
-              "period": 0.06,
-              "data_type": "boolean",
-              "true_color": 4283215696,
-              "false_color": 4294198070
-            }
-          },
-          {
-            "title": "對準洞(砲台TF-Luna)",
-            "x": 832.0,
-            "y": 384.0,
-            "width": 256.0,
-            "height": 128.0,
-            "type": "Boolean Box",
-            "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Status/ThroughHole",
-              "period": 0.06,
-              "data_type": "boolean",
-              "true_color": 4283215696,
-              "false_color": 4288585374
             }
           }
         ]
@@ -314,7 +365,7 @@
         "layouts": [],
         "containers": [
           {
-            "title": "Auto 選擇",
+            "title": "Auto 選擇（半場／起點）",
             "x": 0.0,
             "y": 0.0,
             "width": 384.0,
@@ -327,23 +378,36 @@
             }
           },
           {
-            "title": "半場",
+            "title": "Auto 路徑",
             "x": 384.0,
             "y": 0.0,
-            "width": 192.0,
+            "width": 320.0,
             "height": 128.0,
-            "type": "Large Text Display",
+            "type": "ComboBox Chooser",
             "properties": {
-              "topic": "/AdvantageKit/RealOutputs/Scoreboard/Half",
+              "topic": "/Auto Path",
               "period": 0.06,
-              "data_type": "string"
+              "sort_options": false
+            }
+          },
+          {
+            "title": "Auto 目標欄（沒亮燈時）",
+            "x": 704.0,
+            "y": 0.0,
+            "width": 320.0,
+            "height": 128.0,
+            "type": "ComboBox Chooser",
+            "properties": {
+              "topic": "/Auto Column",
+              "period": 0.06,
+              "sort_options": false
             }
           },
           {
             "title": "Jetson 視覺",
-            "x": 576.0,
+            "x": 1024.0,
             "y": 0.0,
-            "width": 192.0,
+            "width": 256.0,
             "height": 128.0,
             "type": "Boolean Box",
             "properties": {
@@ -355,9 +419,37 @@
             }
           },
           {
+            "title": "確認（念出來）",
+            "x": 0.0,
+            "y": 128.0,
+            "width": 1024.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/AutoSummary",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "READY",
+            "x": 1024.0,
+            "y": 128.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/Ready",
+              "period": 0.06,
+              "data_type": "boolean",
+              "true_color": 4283215696,
+              "false_color": 4294198070
+            }
+          },
+          {
             "title": "上半場 加分格發數",
             "x": 0.0,
-            "y": 192.0,
+            "y": 256.0,
             "width": 192.0,
             "height": 128.0,
             "type": "Text Display",
@@ -371,7 +463,7 @@
           {
             "title": "下半場 加分格發數",
             "x": 192.0,
-            "y": 192.0,
+            "y": 256.0,
             "width": 192.0,
             "height": 128.0,
             "type": "Text Display",
@@ -380,6 +472,60 @@
               "period": 0.06,
               "data_type": "double",
               "show_submit_button": true
+            }
+          },
+          {
+            "title": "上半場 每洞發數",
+            "x": 384.0,
+            "y": 256.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/Tuning/Auto/FIRST/BallsPerHole",
+              "period": 0.06,
+              "data_type": "double",
+              "show_submit_button": true
+            }
+          },
+          {
+            "title": "下半場 每洞發數",
+            "x": 576.0,
+            "y": 256.0,
+            "width": 192.0,
+            "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/Tuning/Auto/SECOND/BallsPerHole",
+              "period": 0.06,
+              "data_type": "double",
+              "show_submit_button": true
+            }
+          },
+          {
+            "title": "砲台Luna 啟用",
+            "x": 768.0,
+            "y": 256.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Toggle Switch",
+            "properties": {
+              "topic": "/Tuning/TurretLidar/Enabled",
+              "period": 0.06,
+              "data_type": "boolean"
+            }
+          },
+          {
+            "title": "Jetson 存圖",
+            "x": 1024.0,
+            "y": 256.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Toggle Switch",
+            "properties": {
+              "topic": "/Vision/Record",
+              "period": 0.06,
+              "data_type": "boolean"
             }
           },
           {

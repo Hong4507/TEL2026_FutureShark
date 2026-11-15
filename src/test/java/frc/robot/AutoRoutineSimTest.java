@@ -21,6 +21,9 @@ import org.wpilib.simulation.SimHooks;
 
 import frc.robot.commands.AutoRoutines;
 import frc.robot.commands.AutoRoutines.Half;
+import frc.robot.commands.AutoRoutines.Plan;
+import frc.robot.commands.AutoRoutines.StartSide;
+import frc.robot.commands.AutoRoutines.TargetColumn;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.drive.DriveIOSim;
 import frc.robot.subsystems.drive.GyroIO;
@@ -88,13 +91,53 @@ class AutoRoutineSimTest {
     "SECOND, 0, 3, -0.3",
   })
   void runAuto(Half half, int litColumn, int bumpAtShot, double bumpMeters) {
+    run(new Plan(half, StartSide.RIGHT, true, TargetColumn.MID), litColumn, bumpAtShot, bumpMeters, Double.NaN);
+  }
+
+  /**
+   * §8.7 不跑路徑：機器人直接擺在目標欄前（射擊線偏 15 cm 模擬擺放誤差）。
+   * §8.8 己方欄：沒亮燈時打起點那一側的欄；有亮燈時仍然打亮燈那欄。
+   */
+  @ParameterizedTest(name = "{0} {1} 路徑={2} {3} 亮燈欄={4} 擺在 y={5}")
+  @CsvSource({
+    "FIRST,  RIGHT, false, MID,      -1, 2.0",
+    "FIRST,  RIGHT, false, MID,       1, 2.0",
+    "SECOND, LEFT,  false, OWN_SIDE, -1, 2.9",
+    "SECOND, RIGHT, false, OWN_SIDE, -1, 1.1",
+    "SECOND, RIGHT, false, OWN_SIDE,  2, 1.1",
+    "FIRST,  RIGHT, true,  OWN_SIDE, -1, NaN",  // 跑路徑到中欄，再沿牆到右欄
+  })
+  void runPlan(Half half, StartSide side, boolean runPath, TargetColumn column, int litColumn, double startY) {
+    run(new Plan(half, side, runPath, column), litColumn, -1, 0, startY);
+  }
+
+  private void run(Plan plan, int litColumn, int bumpAtShot, double bumpMeters, double startY) {
+    Half half = plan.half();
     drive = new Drive(new DriveIOSim(), new GyroIO() {});
+    if (!Double.isNaN(startY)) {
+      // 射擊線朝 +x（機器人右側），射球點在鏡頭前方 kShooterForwardOfCameraMeters
+      drive.setPose(new Pose2d(kTargetX - 2.5, startY - VisionConstants.kShooterForwardOfCameraMeters + 0.15,
+          org.wpilib.math.geometry.Rotation2d.fromDegrees(90)));
+    }
     List<Shot> shots = new ArrayList<>();
     double[] now = {0};
     // 指令在流程（sequence）裡時不會觸發排程器回呼，所以改成攔截砲台的擊發：
     // 扳機從 0 變成通電 = 射出一發；扳機斷電 = 這發射完，撞擊在這時候發生。
+    int[] flywheelStops = {0};
     Turret turret = new Turret(new TurretSim()) {
       private boolean firing = false;
+
+      @Override
+      public void setVelocity(double up, double down) {
+        if (up == 0 && !shots.isEmpty()) flywheelStops[0]++;
+        super.setVelocity(up, down);
+      }
+
+      @Override
+      public void setVelocity(double v) {
+        if (v == 0 && !shots.isEmpty()) flywheelStops[0]++;
+        super.setVelocity(v);
+      }
 
       @Override
       public void setTrigger(double volts) {
@@ -110,7 +153,7 @@ class AutoRoutineSimTest {
     };
     Vision vision = new Vision(new VisionIOSim(drive::getPose, litColumn, 7130));
 
-    Command auto = AutoRoutines.bonusThenColumn(drive, vision, turret, half, "RS_C2_Auto");
+    Command auto = AutoRoutines.bonusThenColumn(drive, vision, turret, plan);
     CommandScheduler.getInstance().schedule(auto);
     while (auto.isScheduled() && now[0] < 60) {
       DriverStationSim.notifyNewData();
@@ -120,12 +163,17 @@ class AutoRoutineSimTest {
     }
 
     double[] columns = {kLeftTargetY, kMidTargetY, kRightTargetY};
-    double expectedY = litColumn >= 0 ? columns[litColumn] : kMidTargetY;
+    double fallbackY = switch (plan.fallbackColumn()) {
+      case LEFT -> kLeftTargetY;
+      case MID -> kMidTargetY;
+      case RIGHT -> kRightTargetY;
+    };
+    double expectedY = litColumn >= 0 ? columns[litColumn] : fallbackY;
     int bonus = litColumn >= 0 ? half.bonusBalls() : 0;
     int expectedShots = bonus + 3 * half.ballsPerHole();
 
     System.out.printf("== %s 亮燈欄=%d 撞擊=%d/%.1fm：完成 %.1f s，%d 發 ==%n",
-        half, litColumn, bumpAtShot, bumpMeters, now[0], shots.size());
+        plan.describe(), litColumn, bumpAtShot, bumpMeters, now[0], shots.size());
     double worst = 0;
     for (int i = 0; i < shots.size(); i++) {
       Shot s = shots.get(i);
@@ -136,6 +184,8 @@ class AutoRoutineSimTest {
     }
 
     assertTrue(now[0] < 60, "自動流程沒在 60 秒內跑完");
+    // §8.6：流程中飛輪不停（只有最後結束時停一次）
+    assertEquals(1, flywheelStops[0], "自動流程中飛輪不能停，結束時要停一次");
     assertEquals(expectedShots, shots.size());
     for (int i = 0; i < shots.size(); i++) {
       assertEquals(expectedY, shots.get(i).hitY, i < bonus ? kBonusTolerance : kHoleTolerance, "第 " + (i + 1) + " 發");

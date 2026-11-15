@@ -47,7 +47,8 @@ public class VisionAlign extends Command {
   // 看丟時靠里程計繼續追 lockedError，到位就停著等下一張，所以多等不會亂跑。
   private static final double kAcquireTimeoutSec = 2.0;
   private static final double kLostTimeoutSec = 1.5;
-  private static final double kTotalTimeoutSec = 5.0;
+  /** §8.8：自動流程模擬只用約 22 s（60 s 中），多出來的時間拿來放寬逾時（原本 5 s）。 */
+  private static final double kTotalTimeoutSec = 8.0;
 
   private final Drive drive;
   private final Vision vision;
@@ -60,6 +61,7 @@ public class VisionAlign extends Command {
   private double lockedError;
   private int settledFrames;
   private Pose2d lastPose;
+  private boolean succeeded;
 
   public VisionAlign(Drive drive, Vision vision, Target target) {
     this.drive = drive;
@@ -72,6 +74,7 @@ public class VisionAlign extends Command {
   public void initialize() {
     lockedError = Double.NaN;
     settledFrames = 0;
+    succeeded = false;
     lastPose = drive.getPose();
     totalTimer.restart();
     seenTimer.restart();
@@ -131,7 +134,13 @@ public class VisionAlign extends Command {
   @Override
   public void end(boolean interrupted) {
     drive.setVelocity(0, 0);
-    Logger.recordOutput("VisionAlign/Success", !interrupted && settledFrames >= kSettleFrames);
+    succeeded = !interrupted && settledFrames >= kSettleFrames;
+    Logger.recordOutput("VisionAlign/Success", succeeded);
+  }
+
+  /** 上一次執行是否成功對準（連續 kSettleFrames 張達標）。給自動流程決定要不要重試。 */
+  public boolean succeeded() {
+    return succeeded;
   }
 
   @Override

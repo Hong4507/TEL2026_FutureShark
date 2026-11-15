@@ -9,6 +9,7 @@ import org.wpilib.drive.DifferentialDrive;
 import org.wpilib.drive.DifferentialDrive.WheelVelocities;
 import org.wpilib.command2.Command;
 import org.littletonrobotics.junction.Logger;
+import frc.FSLib.rangefinder.RangeSensorConstants;
 import frc.FSLib.rangefinder.RangeSensors;
 import frc.FSLib.rangefinder.TargetRangeSensor;
 import frc.robot.subsystems.drive.Drive;
@@ -27,6 +28,11 @@ public class LaserAlign extends Command {
   private static final double kTimeoutSec = 2.0;
   /** 誤差比剛開始還大這麼多（rad）→ 轉錯方向，通常是 kYawSign 或左右 TF-Luna 接反。 */
   private static final double kWrongWayRad = 0.15;
+
+  /** 角度死區（rad）。 */
+  private static final double kDeadbandRad = Math.toRadians(RangeSensorConstants.kAlignDeadbandDeg);
+  /** 誤差小於這個值（rad，≈ 5.4°）就算擺正、結束。 */
+  private static final double kToleranceRad = 0.095;
 
   private Angle yaw;
   private double startErrorRad;
@@ -57,7 +63,10 @@ public class LaserAlign extends Command {
         Logger.recordOutput("LaserAlign/WrongDirection", true);
       }
       Logger.recordOutput("LaserAlign/ErrorRad", Math.PI / 2 - yaw.in(Radians));
-      WheelVelocities speeds = DifferentialDrive.arcadeDriveIK(0, Math.copySign(0.1, 1.57 - yaw.in(Radians)), false);
+      double signedError = Math.PI / 2 - yaw.in(Radians);
+      // §8.3 死區：基線只有 17 cm，讀值差 1 cm ≈ 3.4°，目標附近不要一直修
+      double turn = Math.abs(signedError) < kDeadbandRad ? 0 : Math.copySign(0.1, signedError);
+      WheelVelocities speeds = DifferentialDrive.arcadeDriveIK(0, turn, false);
       drive.setVelocity(speeds.left, speeds.right);
       failedTimer.reset();
     } else {
@@ -72,7 +81,7 @@ public class LaserAlign extends Command {
 
   @Override
   public boolean isFinished() {
-    return yaw == null || MathUtil.isNear(Math.PI / 2, yaw.in(Radians), 0.095) || failedTimer.hasElapsed(0.2)
+    return yaw == null || MathUtil.isNear(Math.PI / 2, yaw.in(Radians), kToleranceRad) || failedTimer.hasElapsed(0.2)
       || wrongWay || totalTimer.hasElapsed(kTimeoutSec);
   }
 }

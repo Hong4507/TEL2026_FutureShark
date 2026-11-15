@@ -19,6 +19,7 @@ import org.wpilib.units.measure.Angle;
 
 import frc.FSLib.rangefinder.DualTFLunaRangeSensor;
 import frc.FSLib.rangefinder.RangeSensorConstants;
+import frc.FSLib.rangefinder.RangeSensorConstants.RangeReference;
 import frc.FSLib.rangefinder.RangeSensors;
 import frc.FSLib.rangefinder.TargetRangeSensor;
 import frc.robot.subsystems.drive.Drive;
@@ -64,9 +65,11 @@ class LaserAlignSimTest {
   /** 依模擬位置算兩顆 TF-Luna 的距離。 */
   private final class SimTFLunas implements TargetRangeSensor {
     final boolean leftIsFront;
+    final RangeReference reference;
 
-    SimTFLunas(boolean leftIsFront) {
+    SimTFLunas(boolean leftIsFront, RangeReference reference) {
       this.leftIsFront = leftIsFront;
+      this.reference = reference;
     }
 
     /** 車身前後 offset（+ = 車頭方向）的那顆，光束朝機器人右側打到牆的長度。 */
@@ -85,22 +88,35 @@ class LaserAlignSimTest {
 
     @Override
     public Angle getYaw() {
-      double half = RangeSensorConstants.kBaselineMeters / 2;
+      boolean grid = reference == RangeReference.GRID_WALL;
+      double half = (grid ? RangeSensorConstants.kBaselineMeters : RangeSensorConstants.kLowWallBaselineMeters) / 2;
       double front = beam(half), rear = beam(-half);
       // 光束太斜（> 60°）時 TF-Luna 收不到反射
       if (Math.abs(Math.PI / 2 - drive.getPose().getRotation().getRadians()) > Math.toRadians(60)) return null;
       double left = leftIsFront ? front : rear;
       double right = leftIsFront ? rear : front;
-      return Radians.of(DualTFLunaRangeSensor.yawRad(left, right));
+      if (grid) {
+        // 鏡頭裝在右 frame 內側：讀值 = frame 到牆 + 內縮（擺正時左邊多 0.412 m）
+        left += RangeSensorConstants.kLeftLunaInboardMeters;
+        right += RangeSensorConstants.kRightLunaInboardMeters;
+      }
+      return Radians.of(DualTFLunaRangeSensor.yawRad(reference, left, right));
     }
   }
+
+  /** kYawSign = +1 時，GRID_WALL 方向對的接法：Left 是車頭那顆（11/14 實測）。kYawSign = -1 則相反。 */
+  private static final boolean kGridLeftIsFront = RangeSensorConstants.kYawSign > 0;
 
   private record Result(double startDeg, double endDeg, double seconds, boolean timedOut) {}
 
   private Result run(double headingDeg, boolean leftIsFront) {
+    return run(headingDeg, leftIsFront, RangeReference.GRID_WALL);
+  }
+
+  private Result run(double headingDeg, boolean leftIsFront, RangeReference reference) {
     drive = new Drive(new DriveIOSim(), new GyroIO() {});
     drive.setPose(new Pose2d(kTargetX - kDistance, 2.0, Rotation2d.fromDegrees(headingDeg)));
-    RangeSensors.setForTesting(new SimTFLunas(leftIsFront));
+    RangeSensors.setForTesting(new SimTFLunas(leftIsFront, reference));
 
     LaserAlign cmd = new LaserAlign(drive);
     CommandScheduler.getInstance().schedule(cmd);
@@ -122,11 +138,14 @@ class LaserAlignSimTest {
     return new Result(headingDeg, end, t, timedOut);
   }
 
-  /** 方向對的接法：kYawSign = +1 時，Left 是車尾那顆。 */
+  /**
+   * GRID_WALL（§8.1）：11/14 實測左 Luna 在車頭方向，新公式用「左 − 右」，kYawSign = +1 時方向對。
+   * 擺正時左邊讀值本來就多 0.412 m，新公式扣掉內縮後才不會一直轉。
+   */
   @ParameterizedTest(name = "方向對：從 {0}° 轉正")
   @CsvSource({"60", "75", "85", "95", "105", "120"})
   void squaresUp(double headingDeg) {
-    Result r = run(headingDeg, false);
+    Result r = run(headingDeg, kGridLeftIsFront);
     assertFalse(r.timedOut);
     // LaserAlign 容許 0.095 rad ≈ 5.4°，加上煞停多轉一點
     assertEquals(90, r.endDeg, 7);
@@ -136,7 +155,7 @@ class LaserAlignSimTest {
   @ParameterizedTest(name = "方向對：已經正了 {0}° 不動")
   @CsvSource({"88", "90", "93"})
   void alreadySquareFinishesImmediately(double headingDeg) {
-    Result r = run(headingDeg, false);
+    Result r = run(headingDeg, kGridLeftIsFront);
     assertTrue(r.seconds <= 3 * kDt);
     assertEquals(headingDeg, r.endDeg, 1);
   }
@@ -145,7 +164,37 @@ class LaserAlignSimTest {
   @ParameterizedTest(name = "方向反：從 {0}° 要停下")
   @CsvSource({"75", "85", "105"})
   void wrongDirectionStopsQuickly(double headingDeg) {
-    Result r = run(headingDeg, true);
+    Result r = run(headingDeg, !kGridLeftIsFront);
+    assertFalse(r.timedOut);
+    assertTrue(r.seconds < 1.0, "方向反應該 1 秒內停，實際 " + r.seconds);
+    double worse = Math.abs(r.endDeg - 90) - Math.abs(headingDeg - 90);
+    assertTrue(worse < 15, "方向反時最多再歪 15°，實際多歪 " + worse + "°");
+  }
+
+  // ===== LOW_WALL（§8.2 備案，舊公式；舊測試原樣在 LOW_WALL 下跑）=====
+
+  /** 舊公式方向對的接法：kLowWallYawSign = +1 時，Left 是車尾那顆。 */
+  @ParameterizedTest(name = "LOW_WALL 方向對：從 {0}° 轉正")
+  @CsvSource({"60", "75", "85", "95", "105", "120"})
+  void lowWallSquaresUp(double headingDeg) {
+    Result r = run(headingDeg, false, RangeReference.LOW_WALL);
+    assertFalse(r.timedOut);
+    assertEquals(90, r.endDeg, 7);
+    assertTrue(r.seconds < 2.0, "應該在 2 秒內轉正，實際 " + r.seconds);
+  }
+
+  @ParameterizedTest(name = "LOW_WALL 已經正了 {0}° 不動")
+  @CsvSource({"88", "90", "93"})
+  void lowWallAlreadySquare(double headingDeg) {
+    Result r = run(headingDeg, false, RangeReference.LOW_WALL);
+    assertTrue(r.seconds <= 3 * kDt);
+    assertEquals(headingDeg, r.endDeg, 1);
+  }
+
+  @ParameterizedTest(name = "LOW_WALL 方向反：從 {0}° 要停下")
+  @CsvSource({"75", "85", "105"})
+  void lowWallWrongDirectionStopsQuickly(double headingDeg) {
+    Result r = run(headingDeg, true, RangeReference.LOW_WALL);
     assertFalse(r.timedOut);
     assertTrue(r.seconds < 1.0, "方向反應該 1 秒內停，實際 " + r.seconds);
     double worse = Math.abs(r.endDeg - 90) - Math.abs(headingDeg - 90);

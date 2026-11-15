@@ -17,6 +17,9 @@ import frc.robot.Constants.FieldConstants;
 import frc.robot.Constants.RobotMode;
 import frc.robot.commands.AutoRoutines;
 import frc.robot.commands.AutoRoutines.Half;
+import frc.robot.commands.AutoRoutines.Plan;
+import frc.robot.commands.AutoRoutines.StartSide;
+import frc.robot.commands.AutoRoutines.TargetColumn;
 import frc.robot.commands.drive.LaserAlign;
 import frc.robot.commands.drive.VisionAlign;
 import frc.robot.commands.drive.DriveCommands;
@@ -62,8 +65,19 @@ public class RobotContainer {
   /** 前 60 秒自動流程選單（筆電 Dashboard 選，比賽前 90 秒準備時間設定）。 */
   private final LoggedNetworkChooser<AutoOption> autoChooser = new LoggedNetworkChooser<>("Auto Choices");
 
-  /** 自動選項：哪個半場（記分板用來決定每格上限）+ 產生指令的方法。 */
-  private record AutoOption(Half half, String startAuto) {}
+  /** §8.7：跑 PathPlanner 路徑，或機器人直接擺在目標欄前面、只做 VisionAlign＋射擊。 */
+  private final LoggedNetworkChooser<Boolean> autoPathChooser = new LoggedNetworkChooser<>("Auto Path");
+  /** §8.8：沒亮燈時打哪一欄（己方欄 = 起點那一側）。 */
+  private final LoggedNetworkChooser<TargetColumn> autoColumnChooser = new LoggedNetworkChooser<>("Auto Column");
+
+  /** 自動選項：哪個半場（記分板用來決定每格上限）+ 起點。half == null 代表還沒選（READY 燈不會亮）。 */
+  private record AutoOption(Half half, StartSide side) {
+    static final AutoOption NONE = new AutoOption(null, null);
+
+    boolean selected() {
+      return half != null;
+    }
+  }
 
   private Scoreboard scoreboard;
 
@@ -73,7 +87,7 @@ public class RobotContainer {
         drive = new Drive(new DriveIOSpark(), new GyroIOOnboardIMU());
         turret = new Turret(new TurretReal());
         vision = new Vision(new VisionIONT());
-        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getTargetDistance());
+        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getWallDistanceMeters());
         break;
       
       case kSim:
@@ -84,14 +98,14 @@ public class RobotContainer {
             ? new Vision(new VisionIONT())
             : new Vision(new VisionIOSim(drive::getPose));
         // 模擬沒有這顆感測器；用 NT 版本，可以拿 Jetson 或假的 publisher 測
-        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getTargetDistance());
+        turretLidar = new TurretLidar(new TurretLidarIONT(), () -> RangeSensors.get().getWallDistanceMeters());
         break;
 
       default:
         drive = new Drive(new DriveIO() {}, new GyroIO() {});
         turret = new Turret(new TurretIO() {});
         vision = new Vision(new VisionIO() {});
-        turretLidar = new TurretLidar(new TurretLidarIO() {}, () -> RangeSensors.get().getTargetDistance());
+        turretLidar = new TurretLidar(new TurretLidarIO() {}, () -> RangeSensors.get().getWallDistanceMeters());
         break;
     }
 
@@ -106,16 +120,23 @@ public class RobotContainer {
       NamedCommands.registerCommand("VisionAlign" + target.name(), new VisionAlign(drive, vision, target));
     }
 
-    autoChooser.addDefault("上半場-右起點", new AutoOption(Half.FIRST, "RS_C2_Auto"));
-    autoChooser.add("上半場-左起點", new AutoOption(Half.FIRST, "LS_C2_Auto"));
-    autoChooser.add("下半場-右起點", new AutoOption(Half.SECOND, "RS_C2_Auto"));
-    autoChooser.add("下半場-左起點", new AutoOption(Half.SECOND, "LS_C2_Auto"));
-    scoreboard = new Scoreboard(turret, vision, () -> autoChooser.get().half());
+    // 預設「未選」：READY 燈不亮，逼操作手每場都選一次（§8.9）
+    autoChooser.addDefault("（未選）", AutoOption.NONE);
+    autoChooser.add("上半場-右起點", new AutoOption(Half.FIRST, StartSide.RIGHT));
+    autoChooser.add("上半場-左起點", new AutoOption(Half.FIRST, StartSide.LEFT));
+    autoChooser.add("下半場-右起點", new AutoOption(Half.SECOND, StartSide.RIGHT));
+    autoChooser.add("下半場-左起點", new AutoOption(Half.SECOND, StartSide.LEFT));
+    autoPathChooser.addDefault("跑路徑", true);
+    autoPathChooser.add("不跑路徑（擺在目標欄前）", false);
+    autoColumnChooser.addDefault("中欄", TargetColumn.MID);
+    autoColumnChooser.add("己方欄（起點那一側）", TargetColumn.OWN_SIDE);
+    scoreboard = new Scoreboard(turret, vision, () -> currentPlan().half());
     // 開機就給 Auto/Stage 一個值，Elastic 的「Auto 階段」才不會是空的
     Logger.recordOutput("Auto/Stage", "Idle");
 
     controller = new CommandFlySkyController();
-    new StatusBoard(drive, turret, vision, turretLidar, () -> controller.getHID().isConnected());
+    new StatusBoard(drive, turret, vision, turretLidar, () -> controller.getHID().isConnected(),
+        () -> autoChooser.get() != null && autoChooser.get().selected() ? currentPlan() : null);
     Logger.recordOutput("Mode", "disable");
     drive.setDefaultCommand(DriveCommands.arcadeDrive(drive, () -> controller.getLeftY(), () -> -controller.getLeftX()));
 
@@ -243,8 +264,22 @@ public class RobotContainer {
 
   /** 依選單產生新的自動流程指令（同一個指令物件不能重複組合，所以每次都重建）。 */
   private Command buildAuto() {
+    return AutoRoutines.bonusThenColumn(drive, vision, turret, currentPlan());
+  }
+
+  /**
+   * 目前選單組成的自動流程設定。沒選半場／起點時用最安全的設定：上半場、不跑路徑、中欄
+   * （不知道起點在哪一側時不能跑路徑）。
+   */
+  private Plan currentPlan() {
     AutoOption option = autoChooser.get();
-    return AutoRoutines.bonusThenColumn(drive, vision, turret, option.half(), option.startAuto());
+    if (option == null || !option.selected()) {
+      return new Plan(Half.FIRST, StartSide.RIGHT, false, TargetColumn.MID);
+    }
+    Boolean runPath = autoPathChooser.get();
+    TargetColumn column = autoColumnChooser.get();
+    return new Plan(option.half(), option.side(), runPath == null || runPath,
+        column == null ? TargetColumn.MID : column);
   }
 
   /** 只有在 DS 進 autonomous 模式時才會用到（目前用 FlySky 開關 + MockDS 的 teleop 啟動，不會進這裡）。 */

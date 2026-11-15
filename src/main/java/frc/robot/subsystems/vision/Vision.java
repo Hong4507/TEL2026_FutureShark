@@ -65,6 +65,11 @@ public class Vision extends SubsystemBase {
     return inputs.connected;
   }
 
+  /** Jetson 回報的處理幀率。 */
+  public double getFps() {
+    return inputs.connected ? inputs.fps : 0.0;
+  }
+
   /** 這個週期是否有新的一張畫面結果。控制迴圈只在有新畫面時更新量測值。 */
   public boolean hasNewFrame() {
     return inputs.newFrame;

@@ -1,6 +1,8 @@
 package frc.robot.subsystems.turretlidar;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -44,5 +46,16 @@ class TurretLidarTest {
     assertEquals("MID", TurretLidar.rowAtHeight(1.95));
     assertEquals("NONE", TurretLidar.rowAtHeight(0.52));
     assertEquals("NONE", TurretLidar.rowAtHeight(1.5)); // 兩列之間的板子
+  }
+
+  /** §8.4：光束打在中列洞中心 ±(0.20 − 0.05) m 內才判斷穿洞。 */
+  @Test
+  void validRangeAroundMidRow() {
+    assertTrue(TurretLidar.inValidRange(1.80));
+    assertTrue(TurretLidar.inValidRange(1.94));
+    assertTrue(TurretLidar.inValidRange(1.66));
+    assertFalse(TurretLidar.inValidRange(1.96));
+    assertFalse(TurretLidar.inValidRange(1.20)); // 低列
+    assertFalse(TurretLidar.inValidRange(Double.NaN)); // 沒有牆距
   }
 }

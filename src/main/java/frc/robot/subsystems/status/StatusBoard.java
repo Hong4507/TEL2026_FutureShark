@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command2.SubsystemBase;
@@ -16,6 +17,7 @@ import frc.FSLib.rangefinder.DualTFLunaRangeSensor;
 import frc.FSLib.rangefinder.RangeSensors;
 import frc.FSLib.rangefinder.TargetRangeSensor;
 import frc.robot.Constants;
+import frc.robot.commands.AutoRoutines;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.turret.Turret;
 import frc.robot.subsystems.turret.TurretConstants;
@@ -31,16 +33,26 @@ import frc.robot.subsystems.vision.Vision;
 public class StatusBoard extends SubsystemBase {
   /** 電池低於這個電壓就在警示列提醒。 */
   public static final double kLowBatteryVolts = 11.5;
+  /** READY 燈的電池門檻（§8.9）：先通電排隊會耗電，不夠就換電池，不要硬上。 */
+  public static final double kReadyBatteryVolts = 12.5;
+  /** READY 燈的 Jetson 幀率門檻。 */
+  public static final double kReadyVisionFps = 10;
   /** 飛輪低於這個速度（rad/s）視為停止。 */
   private static final double kStoppedRadPerSec = 5;
 
   private final Turret turret;
   private final TurretLidar turretLidar;
+  private final Vision vision;
+  /** 目前選的自動流程；還沒選時回傳 null。 */
+  private final Supplier<AutoRoutines.Plan> autoPlan;
 
   /** 名稱 → 是否連線；順序就是警示列的順序。 */
   private final Map<String, BooleanSupplier> connections = new LinkedHashMap<>();
 
-  public StatusBoard(Drive drive, Turret turret, Vision vision, TurretLidar turretLidar, BooleanSupplier flySkyConnected) {
+  public StatusBoard(Drive drive, Turret turret, Vision vision, TurretLidar turretLidar, BooleanSupplier flySkyConnected,
+      Supplier<AutoRoutines.Plan> autoPlan) {
+    this.vision = vision;
+    this.autoPlan = autoPlan;
     this.turret = turret;
     this.turretLidar = turretLidar;
 
@@ -72,6 +84,24 @@ public class StatusBoard extends SubsystemBase {
       case "Gyro" -> "IMU";
       default -> key;
     };
+  }
+
+  /**
+   * READY 條件：連線全部正常（含仰角編碼器）、電池 &gt; {@link #kReadyBatteryVolts}、Jetson fps &gt; {@link #kReadyVisionFps}、
+   * Auto 已選。回傳不 READY 的原因（空 = READY）。
+   */
+  static List<String> readyProblems(List<String> connectionProblems, double batteryVolts, double visionFps,
+      boolean autoSelected) {
+    List<String> out = new ArrayList<>(connectionProblems);
+    out.remove("電池低");
+    if (batteryVolts <= kReadyBatteryVolts) {
+      out.add(String.format(Locale.ROOT, "電池 %.1fV（要 >%.1f）", batteryVolts, kReadyBatteryVolts));
+    }
+    if (visionFps <= kReadyVisionFps) {
+      out.add(String.format(Locale.ROOT, "視覺 %.0ffps（要 >%.0f）", visionFps, kReadyVisionFps));
+    }
+    if (!autoSelected) out.add("Auto 未選");
+    return out;
   }
 
   @Override
@@ -108,6 +138,7 @@ public class StatusBoard extends SubsystemBase {
             ? String.format(Locale.ROOT, "%.2f m", turretLidar.getDistanceMeters().getAsDouble())
             : "超出範圍";
     Logger.recordOutput("Status/TurretLidarDistance", lidarText);
+    Logger.recordOutput("Status/TurretLidarBeam", turretLidar.getBeamText());
     Logger.recordOutput("Status/ThroughHole", turretLidar.isThroughHole());
 
     // ---- 電池 ----
@@ -122,6 +153,19 @@ public class StatusBoard extends SubsystemBase {
       if (!ok) problems.add(label(e.getKey()));
     }
     if (battery < kLowBatteryVolts) problems.add("電池低");
-    Logger.recordOutput("Status/Alert", problems.isEmpty() ? "全部正常" : "⚠ " + String.join("、", problems));
+
+    // ---- 自動流程選擇（大字，§8.9：選錯邊是最容易發生、後果最嚴重的錯誤）----
+    AutoRoutines.Plan plan = autoPlan.get();
+    Logger.recordOutput("Status/AutoSide", plan == null ? "未選" : plan.side().label);
+    Logger.recordOutput("Status/AutoHalf", plan == null ? "未選" : plan.halfLabel());
+    Logger.recordOutput("Status/AutoColumn", plan == null ? "未選" : plan.column().label);
+    Logger.recordOutput("Status/AutoPath", plan == null ? "未選" : plan.runPath() ? "跑路徑" : "不跑路徑");
+    Logger.recordOutput("Status/AutoSummary", plan == null ? "⚠ Auto 未選" : plan.describe());
+
+    // ---- READY 燈（§8.9）----
+    List<String> notReady = readyProblems(problems, battery, vision.getFps(), plan != null);
+    Logger.recordOutput("Status/Ready", notReady.isEmpty());
+    Logger.recordOutput("Status/ReadyText", notReady.isEmpty() ? "READY" : "未就緒：" + String.join("、", notReady));
+    Logger.recordOutput("Status/Alert", notReady.isEmpty() ? "全部正常" : "⚠ " + String.join("、", notReady));
   }
 }

@@ -1,5 +1,7 @@
 package frc.FSLib.rangefinder;
 
+import java.util.OptionalDouble;
+
 import org.wpilib.units.measure.Angle;
 
 /**
@@ -16,4 +18,11 @@ public interface TargetRangeSensor {
    * @return 偏航角，π/2 代表正對牆面；無法計算時回傳 {@code null}。
    */
   Angle getYaw();
+
+  /**
+   * @return 右 frame 到九宮格牆面的垂直距離（公尺）；沒有有效讀值時 empty。給砲台 TF-Luna 算「預期板子距離」用（§8.4）。
+   */
+  default OptionalDouble getWallDistanceMeters() {
+    return OptionalDouble.empty();
+  }
 }

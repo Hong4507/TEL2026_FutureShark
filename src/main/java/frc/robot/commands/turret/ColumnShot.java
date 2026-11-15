@@ -12,6 +12,8 @@ public class ColumnShot extends Command {
   private final Turret turret;
   private final double targetHeightMeters;
   private final int targetFiredCount;
+  /** 結束時要不要停飛輪。自動流程中 false（§8.6：每發轉速一樣，停了再加速沒好處），流程結束才停。 */
+  private final boolean stopFlywheelAtEnd;
 
   private final Timer reloadTimer = new Timer();
   private int tureFiredCount = 0;
@@ -22,6 +24,11 @@ public class ColumnShot extends Command {
   private final TargetRangeSensor rangeSensor = RangeSensors.get();
 
   public ColumnShot(Turret turret, double targetHeightMeters, int targetFireCount) {
+    this(turret, targetHeightMeters, targetFireCount, true);
+  }
+
+  public ColumnShot(Turret turret, double targetHeightMeters, int targetFireCount, boolean stopFlywheelAtEnd) {
+    this.stopFlywheelAtEnd = stopFlywheelAtEnd;
     this.turret = turret;
     this.targetHeightMeters = targetHeightMeters;
     this.targetFiredCount = targetFireCount;
@@ -60,7 +67,7 @@ public class ColumnShot extends Command {
 
   @Override
   public void end(boolean interrupted) {
-    turret.setVelocity(0);
+    if (stopFlywheelAtEnd) turret.setVelocity(0);
     turret.setTrigger(0);
     turret.setAimHeight(Double.NaN);
     reloadTimer.stop();

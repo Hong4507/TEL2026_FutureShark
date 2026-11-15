@@ -14,7 +14,9 @@ import frc.robot.commands.drive.VisionAlign;
 import frc.robot.commands.turret.ColumnShot;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.turret.Turret;
+import frc.robot.subsystems.turret.TurretConstants;
 import frc.robot.subsystems.vision.Vision;
+import frc.robot.subsystems.vision.Vision.Column;
 
 /**
  * 前 60 秒自動流程（策略見 Upgrade.md「自動策略」）。
@@ -68,29 +70,100 @@ public final class AutoRoutines {
     }
   }
 
+  /** 起點在九宮格的哪一側（看向九宮格）。 */
+  public enum StartSide {
+    LEFT("左起點", "LS_C2_Auto", Column.LEFT),
+    RIGHT("右起點", "RS_C2_Auto", Column.RIGHT);
+
+    public final String label;
+    /** PathPlanner auto：從起點開到中欄並 LaserAlign。 */
+    public final String pathAuto;
+    /** 己方欄 = 起點那一側的欄（§8.8 定案）。 */
+    public final Column ownColumn;
+
+    StartSide(String label, String pathAuto, Column ownColumn) {
+      this.label = label;
+      this.pathAuto = pathAuto;
+      this.ownColumn = ownColumn;
+    }
+  }
+
+  /** 沒看到亮燈時要打哪一欄（§8.8）。亮燈加分洞永遠優先。 */
+  public enum TargetColumn {
+    MID("中欄"),
+    OWN_SIDE("己方欄");
+
+    public final String label;
+
+    TargetColumn(String label) {
+      this.label = label;
+    }
+  }
+
   /**
-   * @param startAuto PathPlanner 的 auto 名稱（從起始框開到中欄並 LaserAlign），例如 "RS_C2_Auto"
+   * 一次自動流程的設定。
+   *
+   * @param runPath false = 不跑路徑（§8.7）：機器人直接擺在目標欄前面，只做 VisionAlign＋射擊。
    */
+  public record Plan(Half half, StartSide side, boolean runPath, TargetColumn column) {
+    public Column fallbackColumn() {
+      return column == TargetColumn.MID ? Column.MID : side.ownColumn;
+    }
+
+    public String halfLabel() {
+      return half == Half.FIRST ? "上半場" : "下半場";
+    }
+
+    public String describe() {
+      return halfLabel() + "・" + side.label + "・" + (runPath ? "跑路徑" : "不跑路徑") + "・" + column.label;
+    }
+  }
+
+  /** 舊介面：跑 PathPlanner 路徑、沒亮燈打中欄。 */
   public static Command bonusThenColumn(Drive drive, Vision vision, Turret turret, Half half, String startAuto) {
+    StartSide side = startAuto.startsWith("LS") ? StartSide.LEFT : StartSide.RIGHT;
+    return bonusThenColumn(drive, vision, turret, new Plan(half, side, true, TargetColumn.MID));
+  }
+
+  /**
+   * 前 60 秒自動流程：
+   * <ol>
+   *   <li>飛輪開始轉（§8.6，整段不停）＋（選了跑路徑時）PathPlanner 開到中欄。</li>
+   *   <li>等最多 {@link #kLitWaitSeconds} 秒找亮燈加分洞 → 對準亮燈那欄、射加分洞；找不到就對 {@link Plan#fallbackColumn()}。</li>
+   *   <li>同一欄低／中／高，每發前重新 VisionAlign NEAREST，對準失敗重試 1 次（§8.8）。</li>
+   *   <li>結束或取消時停飛輪。</li>
+   * </ol>
+   */
+  public static Command bonusThenColumn(Drive drive, Vision vision, Turret turret, Plan plan) {
+    Half half = plan.half();
     int bonusBalls = half.bonusBalls();
     int ballsPerHole = half.ballsPerHole();
     Logger.recordOutput("Auto/BonusBalls", bonusBalls);
     Logger.recordOutput("Auto/BallsPerHole", ballsPerHole);
+    Logger.recordOutput("Auto/Plan", plan.describe());
+    VisionAlign.Target fallback = switch (plan.fallbackColumn()) {
+      case LEFT -> VisionAlign.Target.LEFT;
+      case MID -> VisionAlign.Target.MID;
+      case RIGHT -> VisionAlign.Target.RIGHT;
+    };
     return Commands.sequence(
-      log("Path"),
-      new PathPlannerAuto(startAuto),
+      log(plan.runPath() ? "Path" : "NoPath"),
+      Commands.parallel(
+        Commands.runOnce(() -> spinUp(turret)),
+        plan.runPath() ? new PathPlannerAuto(plan.side().pathAuto) : Commands.none()
+      ),
       log("WaitLit"),
       Commands.waitUntil(() -> litVisible(vision)).withTimeout(kLitWaitSeconds),
       Commands.either(
         Commands.sequence(
           log("AlignLit"),
-          new VisionAlign(drive, vision, VisionAlign.Target.LIT),
+          alignWithRetry(drive, vision, VisionAlign.Target.LIT),
           log("Bonus"),
           alignedShots(drive, vision, turret, kSpecialTargetHeight, bonusBalls)
         ),
         Commands.sequence(
-          log("NoLit-AlignMid"),
-          new VisionAlign(drive, vision, VisionAlign.Target.MID)
+          log("NoLit-Align" + fallback.name()),
+          alignWithRetry(drive, vision, fallback)
         ),
         () -> litVisible(vision)
       ),
@@ -99,16 +172,41 @@ public final class AutoRoutines {
       alignedShots(drive, vision, turret, kMidTargetHeight, ballsPerHole),
       alignedShots(drive, vision, turret, kHighTargetHeight, ballsPerHole),
       log("Done")
-    ).withName("Auto-" + half + "-" + startAuto);
+    ).finallyDo(() -> {
+      turret.setVelocity(0);
+      turret.setTrigger(0);
+    }).withName("Auto-" + plan.describe());
   }
 
-  /** 每一發前先用視覺對準最近的一欄（已鎖定的那欄），再射一發。 */
+  /** 和 ColumnShot 同一個轉速（下飛輪 80%）。 */
+  private static void spinUp(Turret turret) {
+    double v = TurretConstants.kMaxSpeedRadPerSec;
+    turret.setVelocity(v, v * 0.8);
+  }
+
+  /** VisionAlign；失敗（逾時／找不到）就再試一次（§8.8）。 */
+  private static Command alignWithRetry(Drive drive, Vision vision, VisionAlign.Target target) {
+    VisionAlign first = new VisionAlign(drive, vision, target);
+    return Commands.sequence(
+      first,
+      Commands.either(
+        Commands.sequence(
+          Commands.runOnce(() -> Logger.recordOutput("Auto/AlignRetry", target.name())),
+          new VisionAlign(drive, vision, target)
+        ),
+        Commands.none(),
+        () -> !first.succeeded()
+      )
+    );
+  }
+
+  /** 每一發前先用視覺對準最近的一欄（已鎖定的那欄），再射一發。飛輪不停（§8.6）。 */
   private static Command alignedShots(Drive drive, Vision vision, Turret turret, double height, int count) {
     Command[] shots = new Command[count];
     for (int i = 0; i < count; i++) {
       shots[i] = Commands.sequence(
-        new VisionAlign(drive, vision, VisionAlign.Target.NEAREST),
-        new ColumnShot(turret, height, 1)
+        alignWithRetry(drive, vision, VisionAlign.Target.NEAREST),
+        new ColumnShot(turret, height, 1, false)
       );
     }
     return Commands.sequence(shots);

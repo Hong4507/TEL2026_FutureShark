@@ -54,6 +54,7 @@ python calibrate.py capture --count 25 --square <實際量到的 mm>
 python calibrate.py solve --square <實際量到的 mm>
 python record.py --name 2m5_left_normal          # 依錄影清單錄
 python vision_nt_publisher.py --model best.engine --calib camera_calib.yaml --save-dir captures --save-every 1
+# 11/15 起改用存圖模式：--record（或 NT /Vision/Record），完整收資料→訓練→部署流程見 tools/yolo/README.md
 ```
 
 錄影清單（每段 20～40 秒，邊錄邊慢慢移動機器人）：
