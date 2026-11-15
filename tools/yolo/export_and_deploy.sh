@@ -4,14 +4,14 @@
 # 用法：
 #   ./export_and_deploy.sh runs/real_xxx/weights/best.pt
 #   DRY_RUN=1 ./export_and_deploy.sh best.pt    # 只匯出 ONNX，不連 Jetson（測流程）
-# 環境變數：JETSON（zheng@10.71.30.11）IMGSZ（640，要和 vision_nt_publisher --imgsz 一樣）
+# 環境變數：JETSON（zheng@zheng.local）IMGSZ（640，要和 vision_nt_publisher --imgsz 一樣）
 #
 # 安全：新 engine 先在 Jetson 上試跑一張圖，成功才換；舊的留成 best.engine.bak-<時間>。
 # 換回舊模型：ssh 進 Jetson，cp ~/tel2026/models/best.engine.bak-<時間> ~/tel2026/models/best.engine，再重啟 vision。
 set -euo pipefail
 
 PT="${1:?用法：./export_and_deploy.sh <best.pt>}"
-JETSON="${JETSON:-zheng@10.71.30.11}"
+JETSON="${JETSON:-zheng@zheng.local}"
 IMGSZ="${IMGSZ:-640}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 REMOTE_DIR="tel2026/models"
@@ -60,4 +60,4 @@ REMOTE
 
 echo "== 4/4 重啟 vision 服務（會要 Jetson 的 sudo 密碼）"
 ssh -t "$JETSON" "sudo systemctl restart vision && sleep 8 && systemctl --no-pager status vision | head -15"
-echo "完成。看 Elastic 的 Vision fps／Jetson視覺燈，或瀏覽器開 http://10.71.30.11:1181/"
+echo "完成。看 Elastic 的 Vision fps／Jetson視覺燈，或瀏覽器開 http://zheng.local:1181/"

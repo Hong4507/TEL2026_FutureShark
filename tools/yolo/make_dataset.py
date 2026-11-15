@@ -2,14 +2,16 @@
 """把標好的照片整理成 YOLO 資料集，**依錄影時段**切 train／val。
 
 為什麼不隨機切：存圖模式每秒 2.5 張，相鄰畫面幾乎一樣，隨機切會讓 val 裡的圖在 train 都有「雙胞胎」，
-val 分數虛高。這裡把「同一天、相鄰兩張間隔 < --gap 秒」的照片算同一個時段，整個時段只會在 train 或 val。
+val 分數虛高。這裡把「同一天、相鄰兩張間隔 < --gap 秒」的照片算同一個時段，
+每個時段再切成 --block 秒一塊，**每個時段各挑約 20% 的塊**當 val（整塊只會在 train 或 val）。
+這樣近／中／遠／高曝光每一段在 train 和 val 都有，不會整段被拿去當 val、train 看不到。
 
 檔名格式：captures/YYYYMMDD/HHMMSS_mmm.jpg（vision_nt_publisher.py --record）。
 其他檔名（舊的 cap_YYYYMMDD_HHMMSS_mmm.jpg）也看得懂；完全看不懂的整個資料夾算一個時段。
 
 用法：
   python make_dataset.py --images captures --out datasets/real1115
-  python make_dataset.py --images captures --out datasets/real1115 --val-ratio 0.2 --gap 30
+  python make_dataset.py --images captures --out datasets/real1115 --val-ratio 0.2 --gap 30 --block 20
 輸出：<out>/images/{train,val}、<out>/labels/{train,val}（symlink，--copy 改複製）、<out>/data.yaml、<out>/split.txt
 """
 import argparse
@@ -53,6 +55,20 @@ def sessions(images, gap_s):
     return out + [sorted(v) for v in undated.values()]
 
 
+def blocks(group, block_s):
+    """把一個時段切成每 block_s 秒一塊。"""
+    out, start = [], None
+    for p in group:
+        t = timestamp(p)
+        if t is None:  # 看不懂檔名的時段不切
+            return [group]
+        if start is None or (t - start).total_seconds() >= block_s:
+            out.append([])
+            start = t
+        out[-1].append(p)
+    return out
+
+
 def pick_val(groups, ratio):
     """挑哪些時段當 val：平均分散在整天（早上、中午、下午的光線都有），直到張數 ≥ ratio。"""
     total = sum(len(g) for g in groups)
@@ -89,6 +105,7 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--val-ratio", type=float, default=0.2)
     parser.add_argument("--gap", type=float, default=60.0, help="相鄰兩張間隔超過幾秒就算新的時段")
+    parser.add_argument("--block", type=float, default=20.0, help="每個時段切成幾秒一塊，每段各挑約 val-ratio 的塊當 val")
     parser.add_argument("--copy", action="store_true", help="複製檔案（預設 symlink）")
     args = parser.parse_args()
 
@@ -107,8 +124,12 @@ def main():
     if not images:
         raise SystemExit("❌ 沒有可用的圖片")
 
-    groups = sessions(images, args.gap)
-    val_idx = pick_val(groups, args.val_ratio)
+    sess = sessions(images, args.gap)
+    groups, val_idx = [], set()
+    for g in sess:
+        bs = blocks(g, args.block)
+        val_idx |= {len(groups) + i for i in pick_val(bs, args.val_ratio)}
+        groups += bs
     if os.path.isdir(args.out):
         for sub in ("images", "labels"):
             shutil.rmtree(os.path.join(args.out, sub), ignore_errors=True)
@@ -139,7 +160,10 @@ def main():
         f.write(f"path: {os.path.abspath(args.out)}\ntrain: images/train\nval: images/val\n")
         f.write("names:\n" + "".join(f"  {i}: {n}\n" for i, n in enumerate(CLASS_NAMES)))
 
-    print(f"時段 {len(groups)} 個（val {len(val_idx)} 個），明細見 {args.out}/split.txt")
+    print(f"時段 {len(sess)} 個，切成 {len(groups)} 塊（val {len(val_idx)} 塊），明細見 {args.out}/split.txt")
+    for g in sess:
+        t0 = timestamp(g[0])
+        print(f"  時段 {t0:%H:%M:%S} {len(g):5d} 張" if t0 else f"  {os.path.dirname(g[0])} {len(g):5d} 張")
     for split, (n, b, neg) in counts.items():
         print(f"  {split:5s} {n:5d} 張  {b:6d} 框  負樣本 {neg}")
     if not val_idx:

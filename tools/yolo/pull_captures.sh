@@ -4,13 +4,13 @@
 # 用法：
 #   ./pull_captures.sh                 # 拉到 ./captures/
 #   ./pull_captures.sh ~/data/captures # 指定目的地
-# 環境變數：JETSON（預設 zheng@10.71.30.11）
+# 環境變數：JETSON（預設 zheng@zheng.local）
 #
 # 順便把 Jetson 上的舊模型 .pt（如果有）拉到 ./models/，給 autolabel.py 用
 # （best.engine 只能在建它的那台 Jetson 上用，訓練機不能拿來標註）。
 set -euo pipefail
 
-JETSON="${JETSON:-zheng@10.71.30.11}"
+JETSON="${JETSON:-zheng@zheng.local}"
 DEST="${1:-./captures}"
 mkdir -p "$DEST" ./models
 

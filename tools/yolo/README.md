@@ -1,10 +1,11 @@
 # YOLO 流程（11/15 收資料 → 11/16–20 遠端訓練、部署）
 
-訓練機：4060Ti Ubuntu。Jetson：`zheng@10.71.30.11`（模型在 `~/tel2026/models/`，服務 `vision`）。
+訓練機：4060Ti Ubuntu。Jetson：`zheng@zheng.local`（模型在 `~/tel2026/models/`，服務 `vision`）。
 
 ```
 Jetson 存圖（vision_nt_publisher.py --record 或 Elastic「賽前」的 Jetson 存圖開關）
   ↓ ./pull_captures.sh                       照片 → ./captures/YYYYMMDD/HHMMSS_mmm.jpg，順便找舊 .pt → ./models/
+  ↓ python thin.py --images captures --apply      抽稀：每 1.2 秒留一張、每時段最多 400 張（其餘搬到 captures_thinned/）
   ↓ python autolabel.py --model models/<舊>.pt --images captures
   ↓ 人工修正（X-AnyLabeling，見下）
   ↓ python make_dataset.py --images captures --out datasets/real1115
@@ -40,11 +41,20 @@ yolo checks                                   # 看得到 4060Ti 就好
 ## 2. 拉照片＋舊模型
 
 ```bash
-./pull_captures.sh            # JETSON=zheng@10.71.30.11 可改
+./pull_captures.sh            # JETSON=zheng@zheng.local 可改
 ```
 ⚠️ `best.engine` 是 TensorRT 檔，只能在建它的那台 Jetson 上用，**不能拿來在訓練機上自動標註**。
 要用 `.pt`：script 會到 Jetson 的 `~/tel2026/models/`、`~/tel2026/jetson_tools/runs/*/weights/` 找；
 找不到就在訓練機上找 `train.py` 的輸出 `runs/v0/weights/best.pt`（合成資料版）。都沒有就跳過自動標註、全部人工標。
+
+## 2.5 抽稀
+
+```bash
+python thin.py --images captures                 # 先預覽每個時段會留幾張
+python thin.py --images captures --apply         # 沒留的連 .txt 搬到 captures_thinned/（不刪）
+```
+每秒 2.5 張，相鄰幾乎一樣；全部人工修正太浪費，也會讓某一段（例如額外錄的近距離）佔太多。
+預設 `--min-dt 1.2`（約留 1/3）、`--max-per-session 400`。之後想多加資料，從 `captures_thinned/` 搬回來即可。
 
 ## 3. 自動標註
 
@@ -74,7 +84,7 @@ Ubuntu 22.04（Python 3.10）：先 `sudo apt install python3.11 python3.11-venv
 ## 5. 切資料集、訓練
 
 ```bash
-python make_dataset.py --images captures --out datasets/real1115      # 依錄影時段切 20% 當 val
+python make_dataset.py --images captures --out datasets/real1115      # 每個時段切 20 秒一塊，各段挑約 20% 的塊當 val
 ./train.sh datasets/real1115/data.yaml models/<舊>.pt                  # 接續舊權重；沒有就省略第二個參數（yolo11n.pt）
 ```
 - 為什麼依時段切：每秒 2.5 張，相鄰畫面幾乎一樣，隨機切 val 分數會虛高。切法寫在 `datasets/real1115/split.txt`。
