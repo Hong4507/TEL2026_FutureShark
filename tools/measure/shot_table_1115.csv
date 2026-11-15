@@ -1,11 +1,11 @@
 row,distance_m,pitch_rad,hits_of_5,note,luna_slant_m
 LOW,,,,,
-LOW,4.07,1.3744,5,,
+LOW,,1.3744,5,砲台Luna原始讀值（console 抄的）,4.07
 LOW,,,,,
-MID,4.07,1.2298,5,,
+MID,,1.2298,5,砲台Luna原始讀值（console 抄的）,4.07
 MID,,,,,
 MID,,,,,
-HIGH,4.05,1.0915,5,,
+HIGH,,1.0915,5,砲台Luna原始讀值（console 抄的）,4.05
 HIGH,,,,,
 HIGH,,,,,
 BONUS,,,,,

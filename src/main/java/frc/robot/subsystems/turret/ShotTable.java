@@ -18,7 +18,7 @@ import frc.FSLib.util.Util;
  *
  * <p>規則：
  * <ul>
- *   <li>某列的表少於 2 點 → 用原本的彈道公式（{@link #ballisticPitchRad}），所以表空著時行為和以前一樣。</li>
+ *   <li>某列的表是空的 → 用原本的彈道公式（{@link #ballisticPitchRad}），所以表空著時行為和以前一樣。</li>
  *   <li>距離在表的範圍內 → 線性插值。</li>
  *   <li>距離超出範圍 → 用彈道公式，再加上「最靠近那一端的實測值 − 公式值」的差（讓兩邊接起來，不會突然跳）。</li>
  * </ul>
@@ -27,7 +27,7 @@ public final class ShotTable {
   private ShotTable() {}
 
   // ===== 實測資料：{TargetDistance (m), 仰角 (rad)}，順序不拘 =====
-  // TODO 11/15 上機量測後填入（每列至少 2 點，建議 3~5 點涵蓋實際會射的距離）
+  // 11/15 上機量測後用 tools/measure/apply_measurements.py 填入（1 點就能用＝公式加固定修正；多點更準）
 
   /** 低列（kLowTargetHeight）。 */
   static final double[][] kLow = {
@@ -60,8 +60,9 @@ public final class ShotTable {
       this(name, heightMeters, points, toMap(points), min(points), max(points));
     }
 
+    /** 1 點就能用：那個距離剛好是實測值，其他距離 = 公式 + (實測 − 公式) 的固定差（§8.5 時間不夠每列只量 1 點）。 */
     boolean hasTable() {
-      return points.length >= 2;
+      return points.length >= 1;
     }
   }
 

@@ -145,8 +145,7 @@ def update_shot_table(src, points):
         if not pts:
             continue  # 沒量的列保持原樣（空的 → 用公式）
         if len(pts) == 1:
-            print(f"⚠️ {row} 只有 1 點：ShotTable 要 2 點以上才查表，1 點時這列仍用公式。"
-                  f"建議在同仰角再量一個距離，或用 ±0.3 m 補一點")
+            print(f"ℹ️ {row} 只有 1 點：其他距離用「公式 + 這點的固定修正」。有空再量 ±0.3 m 會更準")
         if len({d for d, *_ in pts}) != len(pts):
             print(f"⚠️ {row} 有重複的距離，後面的會蓋掉前面的")
         pattern = re.compile(r"(static final double\[\]\[\] " + name + r" = \{\n)(.*?)(  \};)", re.S)

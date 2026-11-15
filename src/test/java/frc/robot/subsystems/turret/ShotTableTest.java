@@ -51,4 +51,16 @@ class ShotTableTest {
     assertEquals(TurretConstants.kMinAngleRad, ShotTable.compute(row, H, 2.0).pitchRad(), 1e-12);
     assertEquals(TurretConstants.kMaxAngleRad, ShotTable.compute(row, H, 3.0).pitchRad(), 1e-12);
   }
+
+  /** 只有 1 點：該距離 = 實測值，其他距離 = 公式 + 固定差。 */
+  @Test
+  void singlePointShiftsFormula() {
+    Row row = new Row("MID", H, new double[][] {{3.9, 1.2298}});
+    assertEquals(1.2298, ShotTable.compute(row, H, 3.9).pitchRad(), 1e-9);
+    double offset = 1.2298 - ShotTable.ballisticPitchRad(H, 3.9);
+    ShotTable.Result r = ShotTable.compute(row, H, 2.5);
+    assertEquals(Source.EXTRAPOLATED, r.source());
+    assertEquals(Math.max(TurretConstants.kMinAngleRad, Math.min(TurretConstants.kMaxAngleRad,
+        ShotTable.ballisticPitchRad(H, 2.5) + offset)), r.pitchRad(), 1e-9);
+  }
 }
