@@ -26,5 +26,8 @@
 - [ ] NT 看 `LunaAuto/AlignResult`、`ScanFound`、`Auto/Stage`
 - [ ] ⚠️ 規則要求前 60 秒用 AI 影像辨識：先問裁判不用視覺的 Auto 可不可以。不行就「Auto 方式」選「視覺」
 
-## 4. Limelight（30°）
+## 4. Limelight（30°）＋ YOLO
+- [ ] 存圖畫面**整個偏藍、燈光過曝**：在 Limelight 網頁 `http://10.71.30.12:5801` 調白平衡（紅色要是紅色）、曝光調低並固定。
+      亮燈加分洞是看紅色像素，偏藍可能讓 litScore 失效 → 用紅色 LED 燈條＋紙板試 `Vision/Targets` 第 6 個值
+- [ ] YOLO 維持舊模型（11/17 在真實存圖上抽 114 張：75% 抓到 ≥3 個大洞）。上機看 `Vision/DetectionCount` 穩不穩
 - [ ] VisionAlign 對準後射一顆，偏哪邊調 `kShooterForwardOfCameraMeters`
