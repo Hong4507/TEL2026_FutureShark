@@ -7,6 +7,12 @@
 - [ ] Elastic 重新載入 `src/main/deploy/elastic-layout.json`
 - [ ] Jetson：新的 `vision_nt_publisher.py`（存圖）、新模型 `best.engine`（YOLO 訓練完的話）
 
+## 0.5 SystemCore 內建 IMU（約 5 分鐘，先做）
+- [ ] 確認 SystemCore 是平放還是直立，程式 `GyroIOOnboardIMU` 的 `MountOrientation`（目前 FLAT）要對得上
+- [ ] 方向：手推車身逆時針轉 90°，`Drive/Gyro/YawRad` 要 **+1.57**（沒變化 = 安裝方向設錯；−1.57 = 正負號反）
+- [ ] 漂移：靜止＋飛輪開著放 3 分鐘，記 `YawRad` 變化（< 1° 很好，> 3° 要靠 Luna 校正）
+- [ ] 和 Luna 對照：轉 10–20°，IMU 轉角 vs `RangeSensor/YawErrorDeg`，差 2° 內才能用「IMU＋單顆 Luna」
+
 ## 1. 插值表（`tools/measure/shot_table_1115.csv`）
 - [ ] 目前 3 點是 11/15 抄的**砲台 Luna 原始斜距**，已用 23° 換算成約 3.9 m：
       低 3.905 m / 1.3744、中 3.905 m / 1.2298、高 3.887 m / 1.0915（各 5/5）。**還沒寫進 ShotTable.java。**
