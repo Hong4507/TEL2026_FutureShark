@@ -121,6 +121,10 @@ public class RobotContainer {
         break;
     }
 
+    // 11/17 距離融合：車身 Luna ＋ IMU ＋ Limelight（一顆 Luna 被擋 → 另一顆＋IMU；兩顆都被擋 → Limelight）。
+    // 要在建立任何 command 之前換上，command 建構時會抓 RangeSensors.get()。
+    RangeSensors.installFusion(drive::getGyroYawRad, vision::getDistanceEstimate);
+
     NamedCommands.registerCommand("ColumnShot", Commands.sequence(
       new ColumnShot(turret, FieldConstants.kLowTargetHeight, 1),
       new ColumnShot(turret, FieldConstants.kMidTargetHeight, 1),

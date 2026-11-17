@@ -103,6 +103,11 @@ public class Drive extends SubsystemBase {
     return gyroInputs.connected;
   }
 
+  /** 陀螺儀累積的偏航角（rad，逆時針為正）。不受 setPose 影響（PathPlanner 重設位置時不會跳），給測距融合當角度基準。 */
+  public double getGyroYawRad() {
+    return gyroYawRad;
+  }
+
   public Pose2d getPose() {
     return odometry.getPose();
   }

@@ -28,7 +28,12 @@ public class Vision extends SubsystemBase {
 
   private final VisionIO io;
   private final VisionIOInputsAutoLogged inputs = new VisionIOInputsAutoLogged();
-  private final TargetRangeSensor rangeSensor = RangeSensors.get();
+  private final LoggedNetworkNumber widthScale =
+      new LoggedNetworkNumber("/Tuning/Vision/WidthScale", kDefaultWidthScale);
+  /** 連續有效一段時間才採用視覺距離（避免偶爾一張誤判）。 */
+  private final org.wpilib.math.filter.Debouncer distanceDebouncer =
+      new org.wpilib.math.filter.Debouncer(0.3, org.wpilib.math.filter.Debouncer.DebounceType.RISING);
+  private OptionalDouble distanceEstimate = OptionalDouble.empty();
 
   private final LoggedNetworkNumber minConfidence =
     new LoggedNetworkNumber("/Tuning/Vision/MinConfidence", kDefaultMinConfidence);
@@ -55,6 +60,16 @@ public class Vision extends SubsystemBase {
     }
     detections = Collections.unmodifiableList(parsed);
 
+    // 視覺估距離（先算，下面 RangeSensors 可能會用到它）
+    OptionalDouble raw = inputs.connected
+        ? estimateTargetDistance(detections, widthScale.get()) : OptionalDouble.empty();
+    boolean stable = distanceDebouncer.calculate(raw.isPresent());
+    distanceEstimate = stable ? raw : OptionalDouble.empty();
+    Logger.recordOutput("Vision/DistanceRawMeters", raw.orElse(Double.NaN));
+    Logger.recordOutput("Vision/DistanceMeters", distanceEstimate.orElse(Double.NaN));
+
+    // 每次都重新拿（RangeSensors 可能被換成融合版，它會用到上面的視覺距離）
+    TargetRangeSensor rangeSensor = RangeSensors.get();
     double distance = Vision.cameraDistance(rangeSensor.getTargetDistance());
     Logger.recordOutput("Vision/DetectionCount", detections.size());
     Logger.recordOutput("Vision/ColumnErrorsMeters", getColumnErrors(distance).stream().mapToDouble(Double::doubleValue).toArray());
@@ -77,6 +92,42 @@ public class Vision extends SubsystemBase {
 
   public List<Detection> getDetections() {
     return detections;
+  }
+
+  /**
+   * 視覺估的距離（和 RangeSensor/TargetDistance 同定義：DownShooter 輪心到九宮格牆面），
+   * 連續 0.3 s 有效才給；沒有就 empty。
+   */
+  public OptionalDouble getDistanceEstimate() {
+    return distanceEstimate;
+  }
+
+  /**
+   * 用大洞的框寬估距離：取所有「完整」大洞（沒被畫面邊緣切到）各自的估計值的中位數。至少 {@link VisionConstants#kMinHolesForDistance} 個。
+   *
+   * <p>Jetson 的框寬 w = atan(x右) − atan(x左)（同一列像素的兩邊），x = X/Zc，所以 Zc ≈ D / (2 tan(w/2) (1 + x²))。
+   * 相機往上仰 θ：水平深度 = Zc × (cos θ − y sin θ)，y = tan(ty) √(1 + x²)。最後減掉鏡頭在輪心後方的距離。
+   */
+  public static OptionalDouble estimateTargetDistance(List<Detection> detections, double widthScale) {
+    double halfH = Math.toRadians(kHorizontalFovDeg) / 2 - Math.toRadians(1);
+    double halfV = Math.toRadians(kVerticalFovDeg) / 2 - Math.toRadians(1);
+    double pitch = Math.toRadians(kCameraPitchDeg);
+    List<Double> values = new ArrayList<>();
+    for (Detection d : detections) {
+      if (d.classId() != kClassHole || !(d.widthRad() > 0)) continue;
+      if (Math.abs(d.txRad()) + d.widthRad() / 2 > halfH) continue;
+      if (Math.abs(d.tyRad()) + d.widthRad() / 2 > halfV) continue;
+      double x = Math.tan(d.txRad());
+      double y = Math.tan(d.tyRad()) * Math.sqrt(1 + x * x);
+      double zc = kHoleDiameterMeters * widthScale / (2 * Math.tan(d.widthRad() / 2) * (1 + x * x));
+      double depth = zc * (Math.cos(pitch) - y * Math.sin(pitch));
+      values.add(depth - kCameraBehindShooterMeters);
+    }
+    if (values.size() < kMinHolesForDistance) return OptionalDouble.empty();
+    values.sort(null);
+    int n = values.size();
+    double median = n % 2 == 1 ? values.get(n / 2) : (values.get(n / 2 - 1) + values.get(n / 2)) / 2;
+    return OptionalDouble.of(median);
   }
 
   /** DownShooter 輪心到板面距離（TargetDistance）→ 攝影機鏡頭到板面距離。 */

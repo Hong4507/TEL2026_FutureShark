@@ -61,6 +61,20 @@ public final class VisionConstants {
    */
   public static final double kCameraPitchDeg = 30.0;
 
+  /** Limelight 2 實測視角（度）。用來排除被畫面邊緣切掉的框（框寬會變小、距離會估太遠）。 */
+  public static final double kHorizontalFovDeg = 62.5;
+  public static final double kVerticalFovDeg = 48.9;
+
+  /** 大洞直徑（公尺，規則 Ø40 cm）。視覺估距離用。 */
+  public static final double kHoleDiameterMeters = 0.40;
+  /**
+   * 視覺估距離：YOLO 框通常比洞本身大或小一點，用這個比例校正（NT {@code /Tuning/Vision/WidthScale}）。
+   * 11/19 上機：Luna 沒被擋時，看 {@code Vision/DistanceRatio}（Luna 距離 ÷ 視覺距離），乘上目前的值填回來。
+   */
+  public static final double kDefaultWidthScale = 1.0;
+  /** 至少要幾個完整的大洞才估距離。 */
+  public static final int kMinHolesForDistance = 3;
+
   /** 攝影機高度（公尺），只用在模擬。 */
   public static final double kCameraHeightMeters = 0.46459;
 

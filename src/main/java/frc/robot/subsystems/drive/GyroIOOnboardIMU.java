@@ -14,10 +14,12 @@ public class GyroIOOnboardIMU implements GyroIO {
 
   @Override
   public void updateInputs(GyroIOInputs inputs) {
-    // 內建 IMU 永遠存在
-    inputs.connected = true;
     // WPILib 慣例：逆時針為正（NavX 是順時針為正，所以舊程式要取負號）
-    inputs.yawRad = imu.getYawRadians();
+    double yaw = imu.getYawRadians();
+    // 內建 IMU 不會「拔掉」，但讀值變 NaN／無限大就當作壞了（Elastic IMU 燈、READY 燈才看得到）
+    inputs.connected = Double.isFinite(yaw);
+    inputs.yawRad = inputs.connected ? yaw : 0.0;
+    // 11/17 確認 SystemCore 平放（FLAT）：感測器 Z 軸 = 車身偏航軸。直立安裝時這行要改用對應的軸
     inputs.yawVelocityRadPerSec = imu.getGyroRateZ();
   }
 }

@@ -57,7 +57,8 @@ public class StatusBoard extends SubsystemBase {
     this.turretLidar = turretLidar;
 
     TargetRangeSensor range = RangeSensors.get();
-    DualTFLunaRangeSensor luna = range instanceof DualTFLunaRangeSensor d ? d : null;
+    DualTFLunaRangeSensor luna = range instanceof DualTFLunaRangeSensor d ? d
+        : range instanceof frc.FSLib.rangefinder.FusedRangeSensor f ? f.luna() : null;
 
     connections.put("FlySky", flySkyConnected);
     connections.put("Vision", vision::isConnected);
@@ -132,7 +133,9 @@ public class StatusBoard extends SubsystemBase {
     Logger.recordOutput("Status/Shots", turret.getShotCount() + " 發");
 
     // ---- 距離 ----
-    Logger.recordOutput("Status/Distance", String.format(Locale.ROOT, "%.2f m", RangeSensors.get().getTargetDistance()));
+    TargetRangeSensor rs = RangeSensors.get();
+    String source = rs instanceof frc.FSLib.rangefinder.FusedRangeSensor f ? " " + f.getSource().label : "";
+    Logger.recordOutput("Status/Distance", String.format(Locale.ROOT, "%.2f m%s", rs.getTargetDistance(), source));
     // TF-Luna 前方範圍內沒東西或訊號太弱時回傳 0，不能直接顯示 0（看起來像貼著東西）
     String lidarText = !turretLidar.isConnected() ? "未連線"
         : turretLidar.getDistanceMeters().isPresent()

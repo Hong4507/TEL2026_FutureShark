@@ -22,7 +22,7 @@ import org.wpilib.system.Timer;
  * 和實機一樣，讓 VisionAlign 的速度調整在模擬裡不會太樂觀。
  */
 public class VisionIOSim implements VisionIO {
-  private static final double kHorizontalFovRad = Math.toRadians(70);
+  private static final double kHorizontalFovRad = Math.toRadians(kHorizontalFovDeg);
   /** Limelight 2 實測 VFOV 48.9°。 */
   private static final double kVerticalFovRad = Math.toRadians(48.9);
   private static final double kHoleDiameterMeters = 0.40;
@@ -141,7 +141,8 @@ public class VisionIOSim implements VisionIO {
     if (Math.abs(tx) > kHorizontalFovRad / 2) return;
     double ty = Math.atan2(yc, Math.hypot(right, zc));
     if (Math.abs(ty) > kVerticalFovRad / 2) return;
-    double width = 2 * Math.atan2(diameter / 2, depth);
+    // 和 Jetson 一樣：框左右兩邊（同一列）的水平角度差
+    double width = Math.atan((right + diameter / 2) / zc) - Math.atan((right - diameter / 2) / zc);
     out.add(new double[] {cls, tx, ty, 0.9, width, litScore});
   }
 }

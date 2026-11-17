@@ -268,7 +268,7 @@
             "title": "模式",
             "x": 0.0,
             "y": 384.0,
-            "width": 224.0,
+            "width": 192.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {
@@ -279,7 +279,7 @@
           },
           {
             "title": "飛輪",
-            "x": 224.0,
+            "x": 192.0,
             "y": 384.0,
             "width": 160.0,
             "height": 128.0,
@@ -292,7 +292,7 @@
           },
           {
             "title": "仰角",
-            "x": 384.0,
+            "x": 352.0,
             "y": 384.0,
             "width": 192.0,
             "height": 128.0,
@@ -305,7 +305,7 @@
           },
           {
             "title": "射出",
-            "x": 576.0,
+            "x": 544.0,
             "y": 384.0,
             "width": 96.0,
             "height": 128.0,
@@ -318,9 +318,9 @@
           },
           {
             "title": "目標距離",
-            "x": 672.0,
+            "x": 640.0,
             "y": 384.0,
-            "width": 160.0,
+            "width": 224.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {
@@ -331,9 +331,9 @@
           },
           {
             "title": "砲台Luna",
-            "x": 832.0,
+            "x": 864.0,
             "y": 384.0,
-            "width": 320.0,
+            "width": 288.0,
             "height": 128.0,
             "type": "Large Text Display",
             "properties": {

@@ -102,7 +102,12 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
   }
 
   /** 一次讀取的結果（距離已濾波）。 */
-  private record Reading(double left, double right, boolean leftValid, boolean rightValid) {}
+  public record Reading(double left, double right, boolean leftValid, boolean rightValid) {}
+
+  /** 最新的濾波後讀值（給 {@link FusedRangeSensor} 用）。 */
+  public Reading getReading() {
+    return read();
+  }
 
   /** 公式計算結果。yawRad 是相對正對牆面的偏差（0 = 正對，已乘 kYawSign）；單邊或都無效時 NaN。 */
   public record Solution(double targetDistance, double wallDistance, double yawRad, boolean valid) {}
