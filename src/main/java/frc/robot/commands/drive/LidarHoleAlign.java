@@ -47,6 +47,8 @@ public class LidarHoleAlign extends Command {
   private static final double kStallWindowSec = 0.5;
   private static final double kStallMinProgressMeters = 0.02;
 
+  private final java.util.function.DoubleSupplier approach;
+  private final java.util.function.DoubleSupplier search;
   private final Drive drive;
   private final TurretLidar lidar;
   private final double dir;
@@ -61,8 +63,21 @@ public class LidarHoleAlign extends Command {
   private final Timer centerTimer = new Timer();
   private double stallRef;
   private boolean firstSearchCycle;
+  private State lastState;
 
   public LidarHoleAlign(Drive drive, TurretLidar lidar, double dir) {
+    this(drive, lidar, dir, kApproachMeters::get, kSearchMeters::get);
+  }
+
+  /** 手動對齊用：自己給前進／搜尋距離（不用自動流程的 NT 參數）。 */
+  public LidarHoleAlign(Drive drive, TurretLidar lidar, double dir, double approachMeters, double searchMeters) {
+    this(drive, lidar, dir, () -> approachMeters, () -> searchMeters);
+  }
+
+  private LidarHoleAlign(Drive drive, TurretLidar lidar, double dir,
+      java.util.function.DoubleSupplier approachMeters, java.util.function.DoubleSupplier searchMeters) {
+    this.approach = approachMeters;
+    this.search = searchMeters;
     this.drive = drive;
     this.lidar = lidar;
     this.dir = Math.signum(dir) == 0 ? 1 : Math.signum(dir);
@@ -74,8 +89,9 @@ public class LidarHoleAlign extends Command {
     Pose2d p = drive.getPose();
     origin = p.getTranslation();
     axis = new Translation2d(p.getRotation().getCos(), p.getRotation().getSin()).times(dir);
-    state = kApproachMeters.get() > 0 ? State.APPROACH : State.SEARCH;
+    state = approach.getAsDouble() > 0 ? State.APPROACH : State.SEARCH;
     firstSearchCycle = true;
+    lastState = state;
     result = lidar.isUsable() ? Result.NOT_RUN : Result.UNAVAILABLE;
     settled = 0;
     stallRef = 0;
@@ -97,7 +113,7 @@ public class LidarHoleAlign extends Command {
     switch (state) {
       case APPROACH -> {
         speed = kApproachSpeed.get();
-        if (s >= kApproachMeters.get()) state = result == Result.UNAVAILABLE ? State.DONE : State.SEARCH;
+        if (s >= approach.getAsDouble()) state = result == Result.UNAVAILABLE ? State.DONE : State.SEARCH;
       }
       case BACKUP -> {
         // 開始找的時候已經在洞裡：不知道進洞邊緣在哪，先倒退到洞外，再重新往前量
@@ -115,7 +131,7 @@ public class LidarHoleAlign extends Command {
         } else if (hole) {
           entry = s;
           state = State.IN_HOLE;
-        } else if (s - Math.max(kApproachMeters.get(), 0) > kSearchMeters.get()) {
+        } else if (s - Math.max(approach.getAsDouble(), 0) > search.getAsDouble()) {
           finish(Result.NOT_FOUND);
         }
       }
@@ -150,6 +166,12 @@ public class LidarHoleAlign extends Command {
       case DONE -> {}
     }
 
+    // 換狀態（例如倒退 → 往前）時速度會先降到 0，重新計算「被擋住」的時間窗，不然會誤判
+    if (state != lastState) {
+      stallRef = s;
+      stallTimer.restart();
+      lastState = state;
+    }
     // 被擋住：有在往前推，0.5 s 內卻幾乎沒前進
     if (state == State.APPROACH || state == State.BACKUP || state == State.SEARCH || state == State.IN_HOLE) {
       if (stallTimer.hasElapsed(kStallWindowSec)) {

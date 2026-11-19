@@ -76,6 +76,9 @@ public class RobotContainer {
   private final LoggedNetworkChooser<TargetColumn> autoColumnChooser = new LoggedNetworkChooser<>("Auto Column");
   /** 11/15：砲台 Luna 找洞（不用視覺，預設）或原本的視覺流程。 */
   private final LoggedNetworkChooser<AutoMethod> autoMethodChooser = new LoggedNetworkChooser<>("Auto Method");
+  /** 11/19：右搖桿左上的對齊方式（Elastic 賽前頁「對齊方式」）。 */
+  private enum AlignMethod { LUNA, VISION, LASER }
+  private final LoggedNetworkChooser<AlignMethod> alignChooser = new LoggedNetworkChooser<>("Align Method");
 
   /** 自動選項：哪個半場（記分板用來決定每格上限）+ 起點。half == null 代表還沒選（READY 燈不會亮）。 */
   private record AutoOption(Half half, StartSide side) {
@@ -162,6 +165,9 @@ public class RobotContainer {
     autoPathChooser.add("不跑路徑（擺在目標欄前）", false);
     autoColumnChooser.addDefault("中欄", TargetColumn.MID);
     autoColumnChooser.add("己方欄（起點那一側）", TargetColumn.OWN_SIDE);
+    alignChooser.addDefault("砲台Luna找洞（沿牆前後找）", AlignMethod.LUNA);
+    alignChooser.add("視覺 VisionAlign（最近一欄）", AlignMethod.VISION);
+    alignChooser.add("LaserAlign（擺正牆面）", AlignMethod.LASER);
     autoMethodChooser.addDefault("砲台Luna找洞（不用視覺）", AutoMethod.LUNA);
     autoMethodChooser.add("視覺（加分洞＋VisionAlign）", AutoMethod.VISION);
     scoreboard = new Scoreboard(turret, vision, () -> currentPlan().half());
@@ -172,7 +178,10 @@ public class RobotContainer {
     new StatusBoard(drive, turret, vision, turretLidar, () -> controller.getHID().isConnected(),
         () -> autoChooser.get() != null && autoChooser.get().selected() ? currentPlan() : null);
     Logger.recordOutput("Mode", "disable");
-    drive.setDefaultCommand(DriveCommands.arcadeDrive(drive, () -> controller.getLeftY(), () -> -controller.getLeftX()));
+    // Assist 射擊中（右開關開）左搖桿 X 是擊發 → 底盤不吃搖桿，避免一擊發就轉向
+    drive.setDefaultCommand(DriveCommands.arcadeDrive(drive,
+        () -> assistShooting() ? 0 : controller.getLeftY(),
+        () -> assistShooting() ? 0 : -controller.getLeftX()));
 
     // 右開關關著：Auto／RealManual 模式一律正轉；Manual、Assist 和 kDisable（未選模式、左開關剛關掉）都停。
     // 11/19 修 BUG：左開關關掉 → 模式變 kDisable，但 MockDS 停掉後機器人還會 enable 一小段時間，
@@ -224,8 +233,10 @@ public class RobotContainer {
     );
     
     // isDisable 時 lefttop 是啟動自動流程用的，不能同時觸發 LaserAlign（兩個都要 drive，會互相打斷）
+    // 11/19：右搖桿左上 = 對齊（Elastic「對齊方式」選：砲台Luna找洞／VisionAlign／LaserAlign）。
+    // 只要求底盤，所以 Assist／Auto 模式射擊中按也不會中斷射擊。
     isManual().negate().and(isRealManual().negate()).and(isDisable().negate()).and(lefttop())
-      .onTrue(new LaserAlign(drive));
+      .onTrue(Commands.defer(this::buildAlign, java.util.Set.of(drive)));
 
     // 11/19：Auto 模式選列和 Assist 一樣：左下 = 低、右下 = 中、右上 = 高；正下 = 低中高各 2 發（搖桿要按住到射完）
     controller.rightSwitch().and(isAuto()).and(leftdown())
@@ -251,8 +262,8 @@ public class RobotContainer {
         Commands.parallel(
           // 11/19：射大洞。右搖桿 左下=低、右下=中、右上=高（記住）；右搖桿 Y 微調仰角；左搖桿往右推擊發（同 Manual）
           new AssistTurret(turret, () -> controller.getRightY(), () -> controller.getLeftX() > 0.3,
-            righttop(), rightdown(), leftdown()),
-          Commands.idle(drive)
+            righttop(), rightdown(), leftdown())
+          // 11/19：不再佔用底盤（Commands.idle(drive)），對齊才不會把射擊打斷；底盤預設指令在 Assist 射擊時不吃搖桿
         )
       );
 
@@ -281,6 +292,10 @@ public class RobotContainer {
   /** 車子擺在已知角度（起點）時呼叫：IMU 牆面基準 = 現在角度 − StartYawToWallDeg。之後 Luna×2 一致時會再慢慢修正。 */
   private void seedWallHeading() {
     RangeSensors.seedWallHeading(startYawToWallDeg.get());
+  }
+
+  private boolean assistShooting() {
+    return Constants.kRobotMode == RobotMode.kAssist && controller.getHID().getRightSwitch();
   }
 
   private boolean storageRunsByDefault() {
@@ -337,6 +352,16 @@ public class RobotContainer {
   
   public Trigger leftdown() {
     return new Trigger(() -> controller.getRightX() < -0.5 && controller.getRightY() < -0.5);
+  }
+
+  private Command buildAlign() {
+    AlignMethod m = alignChooser.get() == null ? AlignMethod.LUNA : alignChooser.get();
+    Logger.recordOutput("Align/Method", m.name());
+    return switch (m) {
+      case LUNA -> DriveCommands.lunaCenterAlign(drive, turretLidar);
+      case VISION -> new VisionAlign(drive, vision, VisionAlign.Target.NEAREST);
+      case LASER -> new LaserAlign(drive);
+    };
   }
 
   /** 依選單產生新的自動流程指令（同一個指令物件不能重複組合，所以每次都重建）。 */

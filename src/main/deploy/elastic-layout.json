@@ -559,7 +559,7 @@
             "title": "最後一筆查表樣本",
             "x": 256.0,
             "y": 384.0,
-            "width": 768.0,
+            "width": 512.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
@@ -594,6 +594,19 @@
               "period": 0.06,
               "data_type": "double",
               "show_submit_button": true
+            }
+          },
+          {
+            "title": "對齊方式（右搖桿左上）",
+            "x": 768.0,
+            "y": 384.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "ComboBox Chooser",
+            "properties": {
+              "topic": "/Align Method",
+              "period": 0.06,
+              "sort_options": false
             }
           }
         ]
