@@ -1,181 +1,109 @@
-# 11/19（四）上機計畫
+# 比賽日上機計畫（2 小時）
 
-> **原則：先確保能得分，再加功能。** 每一段都有「時間上限」和「失敗就怎麼辦」。
-> 時間到了還沒過 → **照「失敗時」那欄降級、記下問題、往下一段走**。不要卡在同一個問題上超過時間上限。
-> 卡住時把 Elastic 截圖＋console 輸出貼給 Claude（遠端可以同時查）。
+> **目標：確認現有功能在實機能跑，然後凍結程式。不加新功能、不在現場修 bug。**
+> 每段有時間上限，到了沒過 → 用「失敗時」那欄降級、記下來、往下一段。
+> 卡住時：Elastic 截圖＋下面「看這些 NT」的值貼給 Claude。
 
-## 分工（3 人）
-| 角色 | 負責 |
+---
+
+## 前一晚（在家）
+- [ ] `git pull`（branch `claude/task-planning-development-6bppjw`）→ **`.\gradlew build`**（學校可能下載不了相依）
+- [ ] 電池全充、編號，電表量 > 12.5 V
+- [ ] 抄好下面的「操作卡」給操作手
+- [ ] FlySky failsafe 設好（斷訊 → 左右開關回「關」）
+
+---
+
+## 操作卡（給操作手）
+**選模式**：左開關「關」→ 右搖桿擺好位置 → 左開關「開」
+| 右搖桿 | 模式 |
 |---|---|
-| **A 操作手** | FlySky、擺機器人、裝球 |
-| **B 筆電** | Elastic、console、改 NT 參數、**每一段結果填進下面的表格** |
-| **C 量測／撿球** | 捲尺、記命中數、注意安全（機器人動時喊停） |
+| 左上 | **開始自動流程**（比賽開始時用） |
+| 上 | Manual（手動仰角，量表用） |
+| 中間 | Assist |
+| 下 | **Auto 模式**（比賽手動期用這個） |
+| 右上 | 送球（Storage＋Trigger 一直轉，清球用） |
+
+**Auto 模式射擊**：右開關開＋右搖桿 → 左下＝低、右下＝中、右上＝高、正下＝低中高各 2（**按住到球射出**）
+**對齊**：右搖桿左上（Elastic「對齊方式」預設砲台Luna找洞）
+**左開關關 = 全部停**
+
+**比賽流程**
+1. 90 秒準備：車頭朝九宮格、裝球、左開關關 → Elastic 賽前頁選 **Auto（半場＋起點）** → 狀態頁 **READY** 燈
+2. 開始：**右搖桿壓左上 → 左開關打開** → 放下遙控器（自動約 25–35 s）
+3. 60 秒後：左開關關 → 右搖桿往下 → 左開關開（= Auto 模式）→ 射剩下的球
 
 ---
 
-## 前一天（11/18 晚上，在家，有網路）——沒做完，明天一定會卡
-- [ ] 筆電 `git pull`（branch `claude/task-planning-development-6bppjw`）→ **`./gradlew build` 在家跑**（學校網路不保證能下載相依）
-- [ ] AdvantageScope、Elastic 裝好；Elastic 載入 `src/main/deploy/elastic-layout.json`
-- [ ] 電池全部充滿，**標號 1、2、3…**，用電表量靜置電壓記在電池上
-- [ ] 帶：電表、**備用 SparkMax／L298N／USB-TTL／網路線**、紮帶、熱縮管、捲尺、紅色 LED 燈條＋紙板、27 顆球、延長線
-- [ ] 印這份計畫（或手機開著）
+## 0:00–0:15　部署＋基本檢查 **P0**
+- [ ] `.\gradlew deploy` → Elastic 連上（隊號 7130）
+- [ ] 狀態頁 9 個連線燈：**底盤、上下飛輪、仰角編碼器**一定要綠；其他紅的記下來
+- [ ] FlySky：`FlySky/ChannelsUs` 四個搖桿、兩個開關都會動
+- [ ] Manual 模式右開關開：飛輪轉、仰角跟右搖桿動；左搖桿往右擊發後 Storage／Trigger 會送下一顆球（`Storage/ShootFeedState`）
+- [ ] 送球模式（右搖桿右上開機）：Storage＋Trigger 轉，左開關關就停
+- **失敗時**：新程式有問題 → `git checkout 183158c` 部署上一個實機跑過的版本，Auto 改成人工擺位
 
 ---
 
-## 第 0 段：開機檢查＋電力（上限 20 分）**P0**
+## 0:15–0:55　自動流程 ×3 **P0 最重要**
+機器人放起點（**車頭朝九宮格、離九宮格 5.8–7.0 m**）。Elastic：Auto 選擇＝上半場＋右起點、Auto 方式＝砲台Luna找洞。
 
-### 0-1 部署（5 分）
-- [ ] 連上機器人 → `./gradlew deploy` → Elastic 連上 → 狀態頁有數字在跳
-- [ ] Jetson：VS Code Remote 連 Jetson，把 `src/main/java/frc/jetson_tools/vision_nt_publisher.py` 拖進 `~/tel2026/jetson_tools/`（覆蓋），終端機 `sudo systemctl restart vision`
-- **失敗時**：deploy 失敗 → 先用 SystemCore 上原本的程式做第 1 段（射擊量表不太需要新功能），休息時間再處理
+每次看 `Auto/Stage` 依序跑過：
+`BlindApproach` → `TurnToWall` →（`MeasureRetry`）→ `DriveToRange` → `SquareUp` → `Luna-Approach` → `Luna-Shoot` → `Done`
 
-### 0-2 電力檢查（10 分）——上週末「馬達控制器漏電」
-**機器人停用（左開關關）、什麼都不動**時：
-| 檢查 | 正常 | 不正常 → 怎麼辦 |
+| 看到 | 正常 | 不正常 → 怎麼辦 |
 |---|---|---|
-| 有沒有馬達在**轉、抖、嗡嗡響** | 完全不動 | 見下面「找出哪一顆」 |
-| 手摸每一個控制器（SparkMax、TalonFX、**L298N**）溫度 | 不燙 | 燙的那顆 = 嫌疑最大 |
-| Elastic 電池電壓，放 3 分鐘 | 掉 < 0.1 V | 掉很快 = 有東西一直在吃電 |
-| 電表量電池到 PDH 的電流（有鉤表的話） | 停用時 < 2 A | > 2 A = 有東西在耗電 |
+| 盲走 2.55 m | 直直往九宮格走 | **歪掉**：底盤／IMU 有問題 → 改 `BlindApproachMeters` = 0，人工擺到 3.25 m |
+| 轉 90° | **逆時針**（往左轉），右側朝九宮格 | **往右轉** → `StartYawToWallDeg` = **+90** |
+| `Auto/StartDistanceMeters` | 3.2–4.5 的數字 | 一直 NaN（量不到黑板）→ 人工擺位版（見下） |
+| 調整後 Elastic「目標距離」 | ≈ 3.25 | 差很多 → 看 `DriveDistance/ErrorMeters` |
+| 「砲台Luna」欄 | `中列 打在板上`，經過洞時 `穿過洞` | 永遠不會穿過洞 → 看 `TurretLidar/MinusBaselineMeters`：洞的位置 < 0.10 → `/Tuning/TurretLidar/HoleMarginMeters` 設成它的一半 |
+| 射 9 發 | 大部分進 | 偏同一邊 → 記下來；仰角不對 → 插值表問題（回家再處理） |
 
-**找出哪一顆**：一次拔一顆的電（拔保險絲／斷路器或電源線），看症狀消失沒。順序：
-1. **L298N（兩塊）最可疑**：EN jumper 插著 = IN 腳一有電位差就全速。SystemCore 開機中、程式還沒跑起來時 Smart I/O 狀態不確定，馬達可能自己轉。也看 L298N 的 GND 有沒有和 SystemCore 共地、5V jumper 狀態。
-2. 扳機 SparkMax（CAN 12）、仰角 SparkMax（CAN 32）
-3. 底盤 4 顆 SparkMax（14／22／27／1）
-4. 飛輪 TalonFX（13／11）
+**人工擺位版（找洞一直失敗時）**：`BlindApproachMeters` = 0、`StartYawToWallDeg` = 0、賽前頁「砲台Luna 啟用」關 → 機器人**右側朝九宮格、擺在某一欄正前方 3.25 m** → 自動只射 9 發。
 
-- **找到了** → 換備品；沒有備品就**拔掉那個子系統繼續**（例如 Storage 壞了 → 人工一顆一顆餵球也能射）
-- **最低限度能得分的機器人 = 底盤＋飛輪＋仰角＋扳機**，其他都可以先拔
-- 記錄：哪一顆、什麼症狀、換了沒 → 填表 0-2
-
-### 0-3 連線燈（5 分）
-- [ ] Elastic 狀態頁 9 個燈，哪個紅記下來（`Status/Alert` 會列出名字）
-- [ ] **紅的不是 P0 零件（底盤、飛輪、仰角、扳機）就先不管**，往下走
+看這些 NT：`Auto/Stage`、`Auto/StartDistanceMeters`、`TurnByAngle/ErrorDeg`、`DriveDistance/ErrorMeters`、`LunaAuto/AlignResult`、`LunaAuto/AlignState`、`RangeSensor/Source`
 
 ---
 
-## 第 1 段：手動射擊＋插值表（上限 75 分）**P0 ——今天最重要**
+## 0:55–1:25　手動期射擊 **P0**
+Auto 模式、機器人在 3.25 m：
+- [ ] 右搖桿 左下／右下／右上 各射 1 發，進對的列
+- [ ] 正下：低中高各 2 發（按住）
+- [ ] 右搖桿左上（對齊）：`LunaAuto/AlignState` 跑到 DONE，停下時「砲台Luna」= `穿過洞`
+- [ ] 洞後面有黑箱子的話：看 `TurretLidar/MinusBaselineMeters` 對著洞的值，記下來
+- **失敗時**：哪個方向不對就比賽不用那個；對齊不行 → 「對齊方式」改 LaserAlign 或人工對
 
-目標：**在比賽射擊位置每列至少 1 點**（低、中、高，有時間加 BONUS）。
-
-### 1-1 擺位（5 分）
-- 機器人放在**比賽會射的位置**（起跑線附近，牆距約 2.5 m），**正對牆**（目測或 LaserAlign）
-- 地上貼膠帶標記位置，之後每次都放回這裡
-- 看 Elastic「目標距離」右邊的來源：要是 **`Luna×2`**
-  - 是 `預設`（3.00 m）→ 車身 Luna 讀不到黑板 → 見 1-4
-
-### 1-2 每一列（每列上限 15 分）
-1. 模式選 **Manual**（左開關打開時右搖桿往上）
-2. NT `/Tuning/Manual/PitchRad` 填 0 → 先用搖桿找大概的仰角
-3. 用 `/Tuning/Manual/PitchRad` 固定仰角，每次改 0.02 rad，射到連續進
-4. **固定那個仰角再射 5 發**，記命中數
-5. console 那一行整行複製貼到表 1（裡面有 `{距離, 仰角}`、砲台 Luna 斜距、換算距離、和車身 Luna 的差）
-- **「和車身Luna差」超過 ±0.10 m** → 記下來，量完這列再查（車身 Luna 或常數有問題），不要卡住
-- **15 分還收斂不了** → 記「最接近的仰角＋命中數」，換下一列
-
-### 1-3 寫回程式（5 分）
-- 填 `tools/measure/shot_table_1115.csv`（新的列：`distance_m` 填 console `{}` 裡的距離）
-- `python tools/measure/apply_measurements.py` → 看 diff → `y` → `./gradlew build` → `./gradlew deploy`
-- **驗證**：Auto 模式右開關＋右搖桿左下／正下／右下各射 1 發，要進
-
-### 1-4 車身 Luna 讀不到黑板時（上限 10 分）
-- 看 `RangeSensor/LeftAmp`、`RightAmp`、`TFLuna/LeftMeters`，沿牆走一趟
-- 讀不到 → **不要修，直接用砲台 Luna 斜距量表**（console 有換算距離），之後比賽靠 Limelight／砲台 Luna 補；記下來回家處理
+**Assist 射 3 發就停**（有時間才查，10 分鐘）：記下 `Assist/FireCount`、`Storage/ShotsDetected`、`Turret/TriggerVelocityRpm` 最高值 → **比賽不用 Assist，用 Auto 模式**
 
 ---
 
-## 第 2 段：感測器確認（上限 30 分）**P1**
-
-### 2-1 IMU（5 分）——SystemCore 平放
-- [ ] 手推車身**逆時針 90°**：`Drive/Gyro/YawRad` **+1.57**（沒變 = 安裝方向錯；−1.57 = 正負號反）
-- [ ] 飛輪開著靜止 3 分鐘：`YawRad` 變化 < 1°
-- **失敗時**：記下來；IMU 不對 → 距離融合的「單邊+IMU」會失準，但 Luna×2 照常
-
-### 2-2 車身 Luna＋擋住測試（10 分）
-- [ ] 機器人正對牆：來源 `Luna×2`；`RangeSensor/RawFrameDiffMeters` ≈ 0（不是的話填 `kLunaTrimMeters`）
-- [ ] LaserAlign（**Auto 或 Assist 模式**、已啟用，右搖桿左上；Manual 模式下不會觸發）：歪 15° 能轉正；`LaserAlign/WrongDirection` = true → `kYawSign` 改 -1
-- [ ] **拿紙箱擋一顆 Luna**：來源變 `Luna單邊+IMU`，距離幾乎不變
-- [ ] **擋兩顆**：0.2 秒後變 `Limelight`（Limelight 要看得到 ≥ 3 個洞）
-
-### 2-3 砲台 Luna（10 分，**超過就停用**）
-- [ ] 機器人放牆距約 **3.1 m**，手推沿牆走：Elastic「砲台Luna」洞前 = `穿過洞`、板子 = `打在板上`
-- [ ] 顯示 `太遠 +0.4m`／`太近 -0.3m` 時照數字前後調得到
-- **失敗時**（黑板也讀 0、分不出來）→ 賽前頁「砲台Luna 啟用」關掉，Auto 改用「視覺」或人工擺位
-
-### 2-4 Limelight（5 分）——上週末「攝影機不穩」
-- [ ] 瀏覽器 `http://10.71.30.12:5802/` 有畫面；Elastic `Vision/Fps` > 10、Jetson視覺燈綠
-- [ ] Limelight 網頁 `:5801`：**白平衡調到紅色是紅色、曝光調低並固定**（畫面現在整個偏藍）
-- **失敗時**：畫面斷斷續續 → 檢查 Limelight 電源線、網路線、交換器燈（**只花 5 分**）；修不好就不靠視覺，Auto 用「砲台Luna找洞」
+## 1:25–1:45　比賽演練 ×2 **P0 不能砍**
+照「操作卡」的比賽流程跑 2 次，計時：
+- 90 秒準備內完成選 Auto＋READY 燈亮
+- 自動流程跑完（時間：____ s／____ s）
+- 換 Auto 模式射完剩下的球
+- 記：哪一步出錯、READY 燈有沒有誤報
 
 ---
 
-## 第 3 段：Auto（上限 45 分）**P1**
-
-### 3-1 砲台Luna找洞 Auto（25 分）——前提：2-3 通過
-- 賽前頁：Auto 選擇（上半場＋起點）、Auto 方式＝**砲台Luna找洞**、Luna 前進距離
-- 機器人放牆距約 3.1 m（光束打中列），在第一個洞之前 0.3–0.6 m
-- [ ] 右起點往**車頭**、左起點往**車尾**走；方向反了 → 跟 Claude 說（改一個正負號）
-- [ ] 停下來後光束 = `穿過洞`；射 9 發（低中高各 3）
-- [ ] 擋在前面（人站著／紙箱）：會改成原地轉找洞
-- 看：`LunaAuto/AlignResult`、`ScanFound`、`Auto/Stage`
-- **失敗時**：Luna 前進距離設 0、砲台Luna 啟用關掉 → 變成「人工擺位、原地射 9 發」，一樣能得分
-
-### 3-2 視覺 Auto（20 分）——前提：2-4 通過
-- Auto 方式＝視覺、不跑路徑：機器人擺在目標欄前
-- [ ] VisionAlign 停下來後射一發，偏哪邊調 `kShooterForwardOfCameraMeters`（`VisionConstants`）
-- [ ] 紅色 LED＋紙板假加分洞：`Vision/Targets` 第 6 個值（litScore）亮／不亮分得開 → 填 `kDefaultLitThreshold`
-- **失敗時**：比賽用 3-1 或人工擺位
-
-### 3-3 問裁判（有機會就問，不佔時間）
-- [ ] 不用視覺的 Auto（只用 TF-Luna）可不可以？不行就比賽用 3-2
-
----
-
-## 第 4 段：比賽演練（上限 20 分）**P0 ——一定要留時間做**
-照比賽流程跑 **2 次**，每次計時：
-1. 機器人放起點、**車頭朝九宮格**（起點離九宮格 5.8–7.0 m。Auto：陀螺儀歸零 → 盲走 2.55 m → 逆時針轉 90° 量距離（量不到就再走 0.6 m，最多 2 次）→ 開到 3.25 m → 轉 90° → 找洞射，約 25–31 s），裝球；**左開關關著**；看 **READY 燈**，不亮看警示列
-2. 賽前頁選 Auto（半場＋起點、Auto 方式），**念出狀態頁大字**（起點／半場／目標欄／路徑）
-3. 開始：**右搖桿壓左上不放 → 打開左開關** → 自動流程開始 → 放開搖桿、放下遙控器（**不要先選 Auto 模式**，模式選了就啟動不了自動流程）
-4. 60 秒後：放開搖桿時模式會自動變成 Assist（只瞄加分洞）→ **左開關關掉再打開、右搖桿往下 = Auto 模式**
-5. 右開關打開＋右搖桿左下（低）／右下（中）／右上（高）／正下（低中高各 2）射剩下的球，**搖桿按住到球射出**
-- 記：Auto 得幾分、哪一步出錯、READY 燈有沒有誤報
-
----
-
-## 送球模式（清球用）
-- 左開關打開時右搖桿壓**右上** → Storage＋L298N Trigger 不停正轉（飛輪不轉、底盤不動）。左開關關掉就停。
-
-## 結束前（10 分）
-- [ ] 量到的常數都寫回程式並 commit（NT 改的值重開機會消失）
-- [ ] VS Code Remote 連 SystemCore，把 `/home/systemcore/logs/` 的 `.wpilog` 右鍵 Download 到筆電（AdvantageScope 回家可以重看）
-- [ ] 下面的結果表拍照或存檔，貼給 Claude
+## 1:45–2:00　凍結 **P0**
+1. 在 Elastic 改過的值**全部寫回程式**（重開機會消失）：`StartYawToWallDeg`、`BlindApproachMeters`、`ShootDistanceMeters`、`HoleMarginMeters`、`ShotDetectRpm`、`Luna 前進距離`…
+2. `.\gradlew build` → `.\gradlew deploy` → `git commit` + push
+3. **之後不再改程式**
+4. 換上充好的電池，確認 READY 燈
 
 ---
 
 ## 結果表
-| 段 | 結果（過／降級／沒做） | 數值、問題 |
+| 項目 | 結果 | 備註 |
 |---|---|---|
-| 0-2 電力 | | 哪一顆、症狀、處理： |
-| 0-3 連線燈 | | 紅燈： |
-| 1 插值表 低 | | 距離／仰角／命中 /5 |
-| 1 插值表 中 | | |
-| 1 插值表 高 | | |
-| 1 插值表 BONUS | | |
-| 2-1 IMU | | 轉 90° 讀值：　漂移： |
-| 2-2 車身 Luna | | trim：　kYawSign：　擋一顆來源：　擋兩顆來源： |
-| 2-3 砲台 Luna | | |
-| 2-4 Limelight | | fps：　白平衡／曝光： |
-| 3-1 Luna Auto | | 9 發進幾發： |
-| 3-2 視覺 Auto | | kShooterForwardOfCameraMeters：　LitThreshold： |
-| 3-3 裁判 | | |
-| 4 演練 1／2 | | Auto 分數： |
-
-## 時間總表（約 4 小時＋休息）
-| 時間 | 段 | 截止時還沒做完 → |
-|---|---|---|
-| 0:00–0:20 | 0 開機＋電力 | 用最低限度機器人繼續 |
-| 0:20–1:35 | 1 插值表 | 每列至少 1 點就停 |
-| 1:35–2:05 | 2 感測器 | 沒過的停用 |
-| 2:05–2:50 | 3 Auto | 用人工擺位版 |
-| 2:50–3:10 | **4 演練（不能砍）** | — |
-| 3:10–3:20 | 收尾 | — |
+| 部署＋基本檢查 | | 紅燈： |
+| 自動 1 | | 停在哪個 Stage／幾發進 |
+| 自動 2 | | |
+| 自動 3 | | |
+| 手動射擊（左下／右下／右上／正下） | | |
+| 右搖桿對齊 | | |
+| 洞後箱子 MinusBaseline | | ____ m |
+| 演練 1／2 | | 自動時間： |
+| 寫回程式的值 | | |
