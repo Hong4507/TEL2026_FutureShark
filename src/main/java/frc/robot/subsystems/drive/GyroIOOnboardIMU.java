@@ -22,4 +22,9 @@ public class GyroIOOnboardIMU implements GyroIO {
     // 11/17 確認 SystemCore 平放（FLAT）：感測器 Z 軸 = 車身偏航軸。直立安裝時這行要改用對應的軸
     inputs.yawVelocityRadPerSec = imu.getGyroRateZ();
   }
+
+  @Override
+  public void resetYaw() {
+    imu.resetYaw();
+  }
 }

@@ -19,15 +19,22 @@ public class TurretLidarIOSim implements TurretLidarIO {
   private static final double[] kRows = {kLowTargetHeight, kMidTargetHeight, kHighTargetHeight};
 
   private final Supplier<Pose2d> pose;
+  /** 洞後面黑箱子離板面多遠（公尺，水平）；NaN = 沒有箱子（穿過洞讀 0）。 */
+  private final double boxBehindMeters;
   private long heartbeat = 0;
 
   public TurretLidarIOSim(Supplier<Pose2d> pose) {
+    this(pose, Double.NaN);
+  }
+
+  public TurretLidarIOSim(Supplier<Pose2d> pose, double boxBehindMeters) {
     this.pose = pose;
+    this.boxBehindMeters = boxBehindMeters;
   }
 
   @Override
   public void updateInputs(TurretLidarIOInputs inputs) {
-    double d = read(pose.get());
+    double d = read(pose.get(), boxBehindMeters);
     inputs.connected = true;
     inputs.distanceMeters = d;
     inputs.strength = d == 0 ? 0 : 1000;
@@ -36,6 +43,11 @@ public class TurretLidarIOSim implements TurretLidarIO {
 
   /** 光束讀值（公尺）；穿過洞或打不到板子 = 0。 */
   public static double read(Pose2d p) {
+    return read(p, Double.NaN);
+  }
+
+  /** @param boxBehind 洞後面箱子離板面的水平距離；NaN = 沒箱子 */
+  public static double read(Pose2d p, double boxBehind) {
     double h = p.getRotation().getRadians();
     double dx = Math.sin(h), dy = -Math.cos(h); // 機器人右側方向
     if (dx <= 0.05) return 0;
@@ -48,10 +60,16 @@ public class TurretLidarIOSim implements TurretLidarIO {
     double spot = slant * Math.tan(Math.toRadians(1.0));
     for (double cy : kColumns) {
       for (double cz : kRows) {
-        if (Math.hypot(y - cy, z - cz) < kHoleRadius - spot) return 0;
+        if (Math.hypot(y - cy, z - cz) < kHoleRadius - spot) return throughHole(horizontal, dx, pitch, boxBehind);
       }
-      if (Math.hypot(y - cy, z - kSpecialTargetHeight) < kBonusRadius - spot) return 0;
+      if (Math.hypot(y - cy, z - kSpecialTargetHeight) < kBonusRadius - spot) return throughHole(horizontal, dx, pitch, boxBehind);
     }
     return slant > 8 ? 0 : slant;
+  }
+
+  /** 穿過洞：沒箱子 → 0；有箱子 → 光束繼續走到箱子的斜距。 */
+  private static double throughHole(double horizontal, double dx, double pitch, double boxBehind) {
+    if (Double.isNaN(boxBehind)) return 0;
+    return (horizontal + boxBehind / dx) / Math.cos(pitch);
   }
 }

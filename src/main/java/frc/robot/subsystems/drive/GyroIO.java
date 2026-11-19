@@ -11,4 +11,7 @@ public interface GyroIO {
   }
 
   public default void updateInputs(GyroIOInputs inputs) {}
+
+  /** 把偏航角歸零。 */
+  public default void resetYaw() {}
 }

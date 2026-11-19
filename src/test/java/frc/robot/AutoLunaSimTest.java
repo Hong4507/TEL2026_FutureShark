@@ -232,4 +232,18 @@ class AutoLunaSimTest {
     assertAllAt(r.shots, 9, expectedY);
     assertEquals(90, r.endHeadingDeg, 2, "轉完右側朝九宮格");
   }
+
+  /** 11/19：洞後面放實心黑箱子（離板面 boxBehind m）→ 穿過洞讀到的是箱子，不是 0。靠「板子基準」照樣找得到。 */
+  @ParameterizedTest(name = "洞後箱子 {0} m：{1} 從 y={2} → 欄 y={3}")
+  @CsvSource({
+    "0.15, RIGHT, 0.40, 1.1",
+    "0.25, RIGHT, 0.70, 1.1",
+    "0.40, LEFT,  3.60, 2.9",
+    "0.15, RIGHT, 1.30, 2.0",
+  })
+  void findsHoleWithBoxBehind(double boxBehind, StartSide side, double startY, double expectedY) {
+    Run r = run(side, startY, new TurretLidarIOSim(() -> drive.getPose(), boxBehind));
+    assertAllAt(r.shots, 9, expectedY);
+    for (double v : r.shots) assertEquals(expectedY, v, 0.03, "停在洞中間");
+  }
 }

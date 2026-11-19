@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 
 import org.littletonrobotics.junction.Logger;
 import org.littletonrobotics.junction.networktables.LoggedNetworkBoolean;
+import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
 import org.wpilib.command2.SubsystemBase;
 import org.wpilib.math.filter.Debouncer;
 
@@ -57,8 +58,16 @@ public class TurretLidar extends SubsystemBase {
   public static final double kRowEdgeMarginMeters = 0.05;
 
   // ===== 判斷門檻 =====
-  /** 讀值比預期板子距離遠超過這個值 → 穿過洞。 */
+  /** 還沒有「板子基準」時：讀值比預期板子距離（車身 Luna 算的）遠超過這個值 → 穿過洞。 */
   public static final double kHoleMarginMeters = 0.3;
+  /**
+   * 11/19：洞後面會放實心黑箱子（距離未知），穿過洞時讀到的是箱子，只比板子遠一點。
+   * 有「板子基準」（剛剛量到的板子距離）時：讀值比基準遠超過這個值 → 穿過洞。NT 可即時調。
+   * 現場看 {@code TurretLidar/MinusBaselineMeters}：對著板子 ≈ 0，對著洞 = 箱子比板子遠多少，門檻設在兩者中間。
+   */
+  public static final double kDefaultBaselineHoleMarginMeters = 0.10;
+  private static final LoggedNetworkNumber baselineHoleMargin =
+      new LoggedNetworkNumber("/Tuning/TurretLidar/HoleMarginMeters", kDefaultBaselineHoleMarginMeters);
   /** 讀值比預期板子距離近超過這個值 → 前面被擋住。 */
   public static final double kBlockedMarginMeters = 0.3;
   /** 狀態要連續維持這麼久才算數，避免邊緣閃爍。 */
@@ -81,6 +90,11 @@ public class TurretLidar extends SubsystemBase {
   private final Debouncer holeDebouncer = new Debouncer(kDebounceSeconds, Debouncer.DebounceType.BOTH);
   private final Debouncer rawHoleDebouncer = new Debouncer(kDebounceSeconds, Debouncer.DebounceType.BOTH);
 
+  private final BoardBaseline baseline = new BoardBaseline();
+  /** 「比基準遠」（讀到箱子）從什麼時候開始；NaN = 沒有。 */
+  private double farSince = Double.NaN;
+  /** 「比基準遠」持續超過這麼久就不是洞（過一個洞最多約 3 s）。 */
+  static final double kMaxFarSec = 4.0;
   private Beam beam = Beam.NO_DATA;
   private Beam rawBeam = Beam.NO_DATA;
   private boolean throughHole = false;
@@ -108,7 +122,25 @@ public class TurretLidar extends SubsystemBase {
     horizontal = wall.isPresent() ? (wall.getAsDouble() + kInboardMeters) / Math.cos(yaw) : Double.NaN;
     double expected = expectedBoardDistance(horizontal);
     double beamHeight = beamHeightAtBoard(horizontal);
-    rawBeam = enabled.get() ? classify(inputs.connected, inputs.distanceMeters, inputs.strength, expected) : Beam.DISABLED;
+    double now = org.wpilib.system.Timer.getTimestamp();
+    double base = baseline.get(now);
+    rawBeam = enabled.get()
+        ? classify(inputs.connected, inputs.distanceMeters, inputs.strength, expected, base, baselineHoleMargin.get())
+        : Beam.DISABLED;
+    // 只拿「看起來是板子」的讀值更新基準（被擋住、穿過洞都不算）
+    if (rawBeam == Beam.BOARD) {
+      baseline.update(now, inputs.distanceMeters);
+      farSince = Double.NaN;
+    } else if (rawBeam == Beam.THROUGH_HOLE && inputs.distanceMeters >= RangeSensorConstants.kMinValidRangeMeters) {
+      // 穿過洞、讀到後面的箱子：基準保持有效（過一個洞約 2–3 s）；
+      // 一直「比基準遠」超過 kMaxFarSec → 不是洞，是車子離牆變遠了 → 基準改成現在的讀值
+      baseline.touch(now);
+      if (Double.isNaN(farSince)) farSince = now;
+      if (now - farSince > kMaxFarSec) {
+        baseline.reset(now, inputs.distanceMeters);
+        farSince = Double.NaN;
+      }
+    }
     beam = rawBeam;
     if (beam != Beam.NO_DATA && beam != Beam.DISABLED && !inValidRange(beamHeight)) beam = Beam.OUT_OF_RANGE;
     throughHole = holeDebouncer.calculate(beam == Beam.THROUGH_HOLE);
@@ -117,6 +149,8 @@ public class TurretLidar extends SubsystemBase {
 
     Logger.recordOutput("TurretLidar/Valid", isValid());
     Logger.recordOutput("TurretLidar/ExpectedBoardMeters", expected);
+    Logger.recordOutput("TurretLidar/BaselineMeters", base);
+    Logger.recordOutput("TurretLidar/MinusBaselineMeters", inputs.distanceMeters - base);
     Logger.recordOutput("TurretLidar/BeamHeightAtBoardMeters", beamHeight);
     Logger.recordOutput("TurretLidar/BeamRow", rowAtHeight(beamHeight));
     Logger.recordOutput("TurretLidar/Beam", beam.name());
@@ -213,12 +247,62 @@ public class TurretLidar extends SubsystemBase {
 
   /** 純判斷，不含 debounce。distance = 0 或訊號太弱代表「前方範圍內沒東西」。 */
   static Beam classify(boolean connected, double distanceMeters, double strength, double expectedMeters) {
+    return classify(connected, distanceMeters, strength, expectedMeters, Double.NaN, kDefaultBaselineHoleMarginMeters);
+  }
+
+  /**
+   * @param baselineMeters 剛剛量到的板子距離（{@link BoardBaseline}）；NaN = 還沒有 → 用 expected ± {@link #kHoleMarginMeters}
+   * @param baselineMarginMeters 有基準時，比基準遠多少算穿過洞（洞後面有箱子時讀值只會遠一點）
+   */
+  static Beam classify(boolean connected, double distanceMeters, double strength, double expectedMeters,
+      double baselineMeters, double baselineMarginMeters) {
     if (!connected || Double.isNaN(distanceMeters)) return Beam.NO_DATA;
     boolean noReturn = distanceMeters < RangeSensorConstants.kMinValidRangeMeters
         || strength < RangeSensorConstants.kMinStrength;
-    if (noReturn || distanceMeters > expectedMeters + kHoleMarginMeters) return Beam.THROUGH_HOLE;
-    if (distanceMeters < expectedMeters - kBlockedMarginMeters) return Beam.BLOCKED;
+    if (noReturn) return Beam.THROUGH_HOLE;
+    boolean far = Double.isNaN(baselineMeters)
+        ? distanceMeters > expectedMeters + kHoleMarginMeters
+        : distanceMeters > baselineMeters + baselineMarginMeters;
+    if (far) return Beam.THROUGH_HOLE;
+    double near = Double.isNaN(expectedMeters) ? baselineMeters : expectedMeters;
+    if (distanceMeters < near - kBlockedMarginMeters) return Beam.BLOCKED;
     return Beam.BOARD;
+  }
+
+  /**
+   * 板子距離基準：板子一定比洞後面的箱子近，所以基準「往下（變近）跟得快、往上（變遠）跟得慢」，
+   * 一開始就對著洞（基準是箱子）時，一照到板子就會馬上修正。{@link #kStaleSec} 沒更新就作廢。
+   */
+  static final class BoardBaseline {
+    static final double kFallAlpha = 0.3;
+    static final double kRiseAlpha = 0.03;
+    static final double kStaleSec = 1.0;
+    private double value = Double.NaN;
+    private double lastUpdate = Double.NEGATIVE_INFINITY;
+
+    void update(double now, double reading) {
+      if (!Double.isFinite(reading)) return;
+      if (Double.isNaN(value) || now - lastUpdate > kStaleSec) {
+        value = reading;
+      } else {
+        value += (reading < value ? kFallAlpha : kRiseAlpha) * (reading - value);
+      }
+      lastUpdate = now;
+    }
+
+    /** 穿過洞時呼叫：基準值不變，但保持有效。 */
+    void touch(double now) {
+      if (!Double.isNaN(value)) lastUpdate = now;
+    }
+
+    void reset(double now, double reading) {
+      value = reading;
+      lastUpdate = now;
+    }
+
+    double get(double now) {
+      return now - lastUpdate > kStaleSec ? Double.NaN : value;
+    }
   }
 
   public boolean isConnected() {

@@ -47,17 +47,19 @@ class LunaCenterAlignSimTest {
     SimHooks.resumeTiming();
   }
 
-  @ParameterizedTest(name = "從 y={0} 出發 → 停在欄 y={1}")
+  @ParameterizedTest(name = "從 y={0} 出發 → 停在欄 y={1}（洞後箱子 {2} m）")
   @CsvSource({
-    "0.80, 1.1",   // 洞在車頭方向
-    "1.45, 1.1",   // 剛過洞：往前找不到 → 回頭
-    "1.05, 1.1",   // 一開始就在洞裡
-    "2.30, 2.0",   // 剛過中欄
+    "0.80, 1.1, NaN",   // 洞在車頭方向
+    "1.45, 1.1, NaN",   // 剛過洞：往前找不到 → 回頭
+    "1.05, 1.1, NaN",   // 一開始就在洞裡
+    "2.30, 2.0, NaN",   // 剛過中欄
+    "0.80, 1.1, 0.15",  // 洞後面有箱子
+    "1.45, 1.1, 0.15",
   })
-  void centersOnNearestHole(double startY, double expectedY) {
+  void centersOnNearestHole(double startY, double expectedY, double boxBehind) {
     drive = new Drive(new DriveIOSim(), new GyroIO() {});
     drive.setPose(new Pose2d(kTargetX - TurretLidar.idealHorizontalMeters(1), startY, Rotation2d.fromDegrees(90)));
-    TurretLidar lidar = new TurretLidar(new TurretLidarIOSim(() -> drive.getPose()),
+    TurretLidar lidar = new TurretLidar(new TurretLidarIOSim(() -> drive.getPose(), boxBehind),
         () -> OptionalDouble.of(kTargetX - drive.getPose().getX() - TurretLidar.kInboardMeters));
     for (int i = 0; i < 20; i++) { // 實機 TurretLidar 一直在跑；測試先讓它更新（超過 debounce 0.06 s）
       CommandScheduler.getInstance().run();

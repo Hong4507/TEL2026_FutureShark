@@ -108,6 +108,22 @@ public class Drive extends SubsystemBase {
     return gyroYawRad;
   }
 
+  /**
+   * 11/19：Auto 開始時呼叫。陀螺儀偏航歸零；odometry 同步重設，所以 getPose() 的位置和朝向不會跳。
+   * 之後 {@link #getGyroYawRad()} 從 0 開始算。
+   */
+  public void resetGyro() {
+    Pose2d pose = getPose();
+    gyroIO.resetYaw();
+    gyroYawRad = 0.0;
+    lastLeftPositionMeters = driveInputs.leftPositionMeters;
+    lastRightPositionMeters = driveInputs.rightPositionMeters;
+    odometry.resetPosition(Rotation2d.ZERO, driveInputs.leftPositionMeters, driveInputs.rightPositionMeters, pose);
+    Logger.recordOutput("Drive/GyroResetCount", ++gyroResetCount);
+  }
+
+  private int gyroResetCount = 0;
+
   public Pose2d getPose() {
     return odometry.getPose();
   }

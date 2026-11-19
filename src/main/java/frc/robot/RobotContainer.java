@@ -203,11 +203,11 @@ public class RobotContainer {
       seedWallHeadingNow.set(false);
     }).ignoringDisable(true));
 
-    // 自動流程：撥一下就啟動（onTrue）。規則規定啟動後不能再碰遙控器，所以不能用 whileTrue（搖桿放開就會取消）。
+    // 自動流程：撥一下就啟動（onTrue）。開始時先把陀螺儀歸零（11/19），再用起點角度設定牆面基準。規則規定啟動後不能再碰遙控器，所以不能用 whileTrue（搖桿放開就會取消）。
     // 左開關關掉（MockDS 停止 → disable）時一併取消。
     controller.leftSwitch().and(lefttop()).and(isDisable())
       .onTrue(Commands.defer(
-        () -> Commands.runOnce(scoreboard::reset).andThen(Commands.runOnce(this::seedWallHeading)).andThen(buildAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true)
+        () -> Commands.runOnce(scoreboard::reset).andThen(Commands.runOnce(drive::resetGyro)).andThen(Commands.runOnce(this::seedWallHeading)).andThen(buildAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true)
             .beforeStarting(() -> autoRunning = true).finallyDo(() -> autoRunning = false),
         java.util.Set.of(drive, turret)
       ));

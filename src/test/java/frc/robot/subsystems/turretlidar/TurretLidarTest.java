@@ -87,4 +87,28 @@ class TurretLidarTest {
     assertEquals("沒有牆距", TurretLidar.beamText(Beam.OUT_OF_RANGE, Double.NaN));
     assertTrue(TurretLidar.beamText(Beam.OUT_OF_RANGE, TurretLidar.idealHorizontalMeters(0) - 0.4).startsWith("低列 太近"));
   }
+
+  /** 有板子基準時：比基準遠 0.10 m 以上 = 穿過洞（洞後有箱子），否則是板子。 */
+  @Test
+  void baselineDetectsBoxBehindHole() {
+    double base = 3.30;
+    assertEquals(Beam.BOARD, TurretLidar.classify(true, 3.32, 800, 3.4, base, 0.10));
+    assertEquals(Beam.THROUGH_HOLE, TurretLidar.classify(true, 3.45, 800, 3.4, base, 0.10)); // 箱子 15 cm 後
+    assertEquals(Beam.THROUGH_HOLE, TurretLidar.classify(true, 0.0, 0, 3.4, base, 0.10));    // 沒箱子
+    assertEquals(Beam.BLOCKED, TurretLidar.classify(true, 1.0, 800, 3.4, base, 0.10));
+    // 沒有基準時維持舊規則（預期 ± 0.3）
+    assertEquals(Beam.BOARD, TurretLidar.classify(true, 3.45, 800, 3.3, Double.NaN, 0.10));
+  }
+
+  /** 基準：變近跟得快、變遠跟得慢；1 秒沒更新就作廢。 */
+  @Test
+  void boardBaselineFollowsNearest() {
+    TurretLidar.BoardBaseline b = new TurretLidar.BoardBaseline();
+    b.update(0, 3.5);                       // 一開始對著箱子
+    for (int i = 1; i <= 20; i++) b.update(i * 0.01, 3.3); // 照到板子
+    assertEquals(3.3, b.get(0.2), 0.01);
+    for (int i = 21; i <= 30; i++) b.update(i * 0.01, 3.38); // 邊緣混到箱子：慢慢跟，不會馬上跳上去
+    assertTrue(b.get(0.3) < 3.33);
+    assertTrue(Double.isNaN(b.get(2.0)));
+  }
 }
