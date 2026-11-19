@@ -98,6 +98,8 @@ class AutoLunaSimTest {
   }
 
   private double endTargetDistance = Double.NaN;
+  /** 模擬車身 Luna 在黑板上的最遠量程。 */
+  private double kLunaMaxRangeMeters = 4.6;
 
   private Run run(StartSide side, double startY, TurretLidarIO lidarIO, double startHeadingDeg, double startYawToWallDeg,
       double startHorizontal) {
@@ -132,7 +134,8 @@ class AutoLunaSimTest {
 
       @Override
       public OptionalDouble getWallDistanceMeters() {
-        return OptionalDouble.of(wallDistance());
+        // 黑板：太遠量不到（模擬 4.6 m 以外沒讀值）
+        return wallDistance() > kLunaMaxRangeMeters ? OptionalDouble.empty() : OptionalDouble.of(wallDistance());
       }
     });
     TurretLidar lidar = new TurretLidar(lidarIO, () -> OptionalDouble.of(wallDistance()));
@@ -255,12 +258,19 @@ class AutoLunaSimTest {
     for (double v : r.shots) assertEquals(expectedY, v, 0.03, "停在洞中間");
   }
 
-  /** 11/19：車頭朝九宮格、離很遠 → 轉 90° 量距離 → 轉回去開到 TargetDistance 3.0 m → 轉 90° → 找洞射 9 發。 */
-  @ParameterizedTest(name = "車頭朝九宮格、鏡頭到板面 {0} m → 開到 3.0 m 射擊")
-  @CsvSource({"3.70", "3.20", "2.70"})
-  void driveToShootDistanceFirst(double startHorizontal) {
+  /** 11/19：起點離九宮格 5.8–7.0 m、車頭朝九宮格 → 盲走 2.55 m → 轉 90° 量 → 開到 3.25 m → 找洞射 9 發。 */
+  @ParameterizedTest(name = "車頭朝九宮格、TargetDistance {0} m 出發、Luna 量程 {1} m → 3.25 m 射擊")
+  @CsvSource({
+    "5.80, 4.6",
+    "6.40, 4.6",
+    "7.00, 4.6",
+    "7.00, 3.6",   // 量程更短：要往前補走再量
+  })
+  void driveToShootDistanceFirst(double startTarget, double lunaRange) {
+    kLunaMaxRangeMeters = lunaRange;
+    double startHorizontal = startTarget - RangeSensorConstants.kShooterInboardMeters + TurretLidar.kInboardMeters;
     Run r = run(StartSide.RIGHT, 0.40, new TurretLidarIOSim(() -> drive.getPose()), 0, -90, startHorizontal);
-    assertEquals(3.0, endTargetDistance, 0.05, "射擊距離");
+    assertEquals(3.25, endTargetDistance, 0.05, "射擊距離");
     assertAllAt(r.shots, 9, kRightTargetY);
     assertEquals(90, r.endHeadingDeg, 2);
   }

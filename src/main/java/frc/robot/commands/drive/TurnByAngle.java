@@ -17,11 +17,13 @@ public class TurnByAngle extends Command {
   private static final double kP = 0.6;           // 輪速（m/s）/ rad
   private static final double kMaxWheel = 0.35;
   private static final double kMinWheel = 0.04;
-  private static final double kToleranceRad = Math.toRadians(1.5);
+  private static final double kToleranceRad = Math.toRadians(1.0);
   private static final double kTimeoutSec = 3.0;
 
   private final Drive drive;
   private final double angleRad;
+  /** 不是 null 時：轉到這個絕對陀螺儀角度（多次轉向時誤差不會累積）。 */
+  private final java.util.function.DoubleSupplier absoluteTarget;
   private double target;
   private int settled;
   private final Timer timer = new Timer();
@@ -29,12 +31,25 @@ public class TurnByAngle extends Command {
   public TurnByAngle(Drive drive, double angleRad) {
     this.drive = drive;
     this.angleRad = angleRad;
+    this.absoluteTarget = null;
     addRequirements(drive);
+  }
+
+  private TurnByAngle(Drive drive, java.util.function.DoubleSupplier absoluteTarget) {
+    this.drive = drive;
+    this.angleRad = 0;
+    this.absoluteTarget = absoluteTarget;
+    addRequirements(drive);
+  }
+
+  /** 轉到絕對陀螺儀角度（{@link Drive#getGyroYawRad()}），在 initialize 時讀。 */
+  public static TurnByAngle toHeading(Drive drive, java.util.function.DoubleSupplier gyroYawRad) {
+    return new TurnByAngle(drive, gyroYawRad);
   }
 
   @Override
   public void initialize() {
-    target = drive.getGyroYawRad() + angleRad;
+    target = absoluteTarget != null ? absoluteTarget.getAsDouble() : drive.getGyroYawRad() + angleRad;
     settled = 0;
     timer.restart();
   }

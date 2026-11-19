@@ -18,6 +18,8 @@ public class DriveDistance extends Command {
   private static final double kMaxSpeed = 0.6;
   private static final double kMinSpeed = 0.05;
   private static final double kToleranceMeters = 0.02;
+  /** 直走時用陀螺儀保持出發時的朝向（輪速差，m/s per rad）。 */
+  private static final double kHeadingP = 0.8;
 
   private final Drive drive;
   private final DoubleSupplier meters;
@@ -29,6 +31,7 @@ public class DriveDistance extends Command {
   private final Timer stallTimer = new Timer();
   private double stallRef;
   private boolean stalled;
+  private double startYaw;
 
   public DriveDistance(Drive drive, DoubleSupplier meters) {
     this.drive = drive;
@@ -43,6 +46,7 @@ public class DriveDistance extends Command {
     var p = drive.getPose();
     origin = p.getTranslation();
     axis = new Translation2d(p.getRotation().getCos(), p.getRotation().getSin());
+    startYaw = drive.getGyroYawRad();
     settled = 0;
     stalled = false;
     stallRef = 0;
@@ -73,7 +77,9 @@ public class DriveDistance extends Command {
       stallRef = s;
       stallTimer.restart();
     }
-    drive.setVelocity(speed, speed);
+    // 朝向修正：偏左（逆時針）就右輪慢一點
+    double turn = speed == 0 ? 0 : kHeadingP * org.wpilib.math.util.MathUtil.angleModulus(startYaw - drive.getGyroYawRad());
+    drive.setVelocity(speed - turn, speed + turn);
     Logger.recordOutput("DriveDistance/ErrorMeters", err);
   }
 

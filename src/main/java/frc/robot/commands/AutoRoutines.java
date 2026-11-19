@@ -37,11 +37,17 @@ public final class AutoRoutines {
   private AutoRoutines() {}
 
   /**
-   * 11/19：自動流程射擊距離（= RangeSensor/TargetDistance，DownShooter 輪心到九宮格），最佳射程 3 m。
+   * 11/19：自動流程射擊距離（= RangeSensor/TargetDistance，DownShooter 輪心到九宮格），最佳射程 3.2–3.3 m → 3.25。
    * 起點車頭朝九宮格時，自動開始會先轉 90° 量距離，差超過 {@link #kShootDistanceToleranceMeters} 就轉回去前後走到這個距離。
    * 砲台 Luna（23°）在 TargetDistance 3.27 m 時光束打中列中心、有效 2.92–3.62 m；3.0 m 光束打在中列洞偏下，洞比較窄。
    */
-  private static final LoggedNetworkNumber kShootDistance = new LoggedNetworkNumber("/Tuning/Auto/ShootDistanceMeters", 3.0);
+  private static final LoggedNetworkNumber kShootDistance = new LoggedNetworkNumber("/Tuning/Auto/ShootDistanceMeters", 3.25);
+  /**
+   * 11/19：起點離九宮格 5.8–7.0 m（TargetDistance）。先朝九宮格盲走這麼遠（5.8 − 3.25），剩 3.25–4.45 m 再轉過去用 Luna 量。
+   */
+  private static final LoggedNetworkNumber kBlindApproach = new LoggedNetworkNumber("/Tuning/Auto/BlindApproachMeters", 2.55);
+  /** 量不到距離時再往前走多少（公尺）。 */
+  private static final double kRetryStepMeters = 0.6;
   private static final double kShootDistanceToleranceMeters = 0.05;
 
   /** 等亮燈加分格出現的最長時間（秒）。超過就當作燈沒亮 / 辨識不到，改打中欄、不打加分格。 */
@@ -181,22 +187,28 @@ public final class AutoRoutines {
     // 車頭方向往牆的分量（−90 → 1：車頭朝牆；+90 → −1：車尾朝牆）
     double towardWall = Math.cos(-Math.PI / 2 - yaw);
     double[] measured = {Double.NaN};
+    // 起點朝向（陀螺儀）；之後轉向都用絕對角度：朝九宮格 = start、右側朝九宮格 = start − yaw
+    double[] start = {0};
+    DoubleSupplier faceGrid = () -> start[0];
+    DoubleSupplier faceWall = () -> start[0] - yaw;
     return Commands.sequence(
+      Commands.runOnce(() -> start[0] = drive.getGyroYawRad()),
+      // 11/19：起點離九宮格 5.8–7.0 m，車身 Luna 在黑板上量不到那麼遠 → 先盲走（編碼器）
+      log("BlindApproach"),
+      Commands.parallel(Commands.runOnce(() -> spinUp(turret)),
+          new DriveDistance(drive, () -> kBlindApproach.get() / towardWall)),
       log("TurnToWall"),
-      Commands.parallel(Commands.runOnce(() -> spinUp(turret)), new TurnByAngle(drive, -yaw)),
-      // 11/19：最佳射程 ShootDistanceMeters（TargetDistance，預設 3.0 m）。Luna 只能朝右側量，所以轉過來量完再轉回去走
-      Commands.waitSeconds(0.3),
-      Commands.runOnce(() -> {
-        var rs = RangeSensors.get();
-        measured[0] = rs.getWallDistanceMeters().isPresent() ? rs.getTargetDistance() : Double.NaN;
-        Logger.recordOutput("Auto/StartDistanceMeters", measured[0]);
-      }),
+      TurnByAngle.toHeading(drive, faceWall),
+      measure(measured),
+      // 量不到（還太遠）→ 轉回去再往前 0.6 m 再量，最多 2 次
+      retryMeasure(drive, faceGrid, faceWall, towardWall, measured),
+      retryMeasure(drive, faceGrid, faceWall, towardWall, measured),
       Commands.either(
         Commands.sequence(
           log("DriveToRange"),
-          new TurnByAngle(drive, yaw),
+          TurnByAngle.toHeading(drive, faceGrid),
           new DriveDistance(drive, () -> (measured[0] - kShootDistance.get()) / towardWall),
-          new TurnByAngle(drive, -yaw)
+          TurnByAngle.toHeading(drive, faceWall)
         ),
         Commands.none(),
         () -> Double.isFinite(measured[0]) && Math.abs(towardWall) > 0.5
@@ -206,6 +218,34 @@ public final class AutoRoutines {
       new LaserAlign(drive),
       main
     ).withName(main.getName());
+  }
+
+  /** 等 Luna 讀值穩定後量 TargetDistance；沒有有效牆距 = NaN。 */
+  private static Command measure(double[] measured) {
+    return Commands.sequence(
+      Commands.waitSeconds(0.3),
+      Commands.runOnce(() -> {
+        var rs = RangeSensors.get();
+        measured[0] = rs.getWallDistanceMeters().isPresent() ? rs.getTargetDistance() : Double.NaN;
+        Logger.recordOutput("Auto/StartDistanceMeters", measured[0]);
+      })
+    );
+  }
+
+  /** 還沒量到距離時：轉回去朝九宮格、往前 {@link #kRetryStepMeters}、轉回來再量。 */
+  private static Command retryMeasure(Drive drive, DoubleSupplier faceGrid, DoubleSupplier faceWall, double towardWall,
+      double[] measured) {
+    return Commands.either(
+      Commands.none(),
+      Commands.sequence(
+        log("MeasureRetry"),
+        TurnByAngle.toHeading(drive, faceGrid),
+        new DriveDistance(drive, () -> kRetryStepMeters / towardWall),
+        TurnByAngle.toHeading(drive, faceWall),
+        measure(measured)
+      ),
+      () -> Double.isFinite(measured[0]) || Math.abs(towardWall) < 0.5
+    );
   }
 
   /**
