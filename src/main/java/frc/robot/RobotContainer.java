@@ -85,9 +85,6 @@ public class RobotContainer {
 
   private Scoreboard scoreboard;
 
-  /** Manual 模式放開擊發後，Storage 再轉多久（秒），把下一顆球送到扳機。 */
-  private static final double kManualFeedAfterShotSec = 0.5;
-
   public RobotContainer() {
     switch (Constants.kCurrentMode) {
       case kReal:
@@ -162,12 +159,9 @@ public class RobotContainer {
     drive.setDefaultCommand(DriveCommands.arcadeDrive(drive, () -> controller.getLeftY(), () -> -controller.getLeftX()));
 
     // L298N 上的馬達（Storage 左右 + L298N Trigger 通道）一律正轉；只靠砲台 NEO550 擊發
-    // 11/19：Manual 模式只有射擊時 Storage 才轉（右開關開＋左搖桿往右擊發，放開後再轉 0.5 s 把下一顆送到位）；
-    // 其他模式維持一律正轉。要改成「Manual 右開關開著就轉」：把 manualFire 換成 controller.rightSwitch()
-    var manualFire = controller.rightSwitch().and(() -> controller.getLeftX() > 0.3)
-        .debounce(kManualFeedAfterShotSec, org.wpilib.math.filter.Debouncer.DebounceType.FALLING);
+    // 11/19：Manual 模式只有右開關打開（射擊狀態）時 Storage 才轉，右開關關掉就停；其他模式維持一律正轉
     stroage.setDefaultCommand(new Normal(stroage,
-        () -> Constants.kRobotMode != RobotMode.kManual || manualFire.getAsBoolean()));
+        () -> Constants.kRobotMode != RobotMode.kManual || controller.getHID().getRightSwitch()));
 
     configureBindings();
   }
