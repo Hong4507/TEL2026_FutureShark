@@ -17,6 +17,8 @@ public interface TurretIO {
 
     public double triggerVolts = 0.0;
     public double triggerCurrentAmps = 0.0;
+    /** 擊發 SparkMax（NEO550）內建 encoder 轉速（RPM，馬達端；inverted 時可能是負的，判斷時取絕對值）。 */
+    public double triggerVelocityRpm = 0.0;
 
     /** CAN 裝置有回應（Phoenix 訊號狀態 OK）。給 Elastic 狀態頁。 */
     public boolean upConnected = false;

@@ -355,6 +355,19 @@
               "data_type": "string",
               "show_submit_button": false
             }
+          },
+          {
+            "title": "雙Luna距離",
+            "x": 0.0,
+            "y": 512.0,
+            "width": 384.0,
+            "height": 128.0,
+            "type": "Large Text Display",
+            "properties": {
+              "topic": "/AdvantageKit/RealOutputs/Status/DualLunaDistance",
+              "period": 0.06,
+              "data_type": "string"
+            }
           }
         ]
       }

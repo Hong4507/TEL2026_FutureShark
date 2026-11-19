@@ -5,7 +5,9 @@
 package frc.robot;
 
 import com.pathplanner.lib.auto.NamedCommands;
+import org.littletonrobotics.junction.networktables.LoggedNetworkBoolean;
 import org.littletonrobotics.junction.networktables.LoggedNetworkChooser;
+import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
 
 import org.wpilib.math.util.MathUtil;
 import org.littletonrobotics.junction.Logger;
@@ -25,6 +27,7 @@ import frc.robot.commands.drive.LaserAlign;
 import frc.robot.commands.drive.VisionAlign;
 import frc.robot.commands.drive.DriveCommands;
 import frc.robot.commands.storage.Normal;
+import frc.robot.commands.storage.ShootFeed;
 import frc.robot.commands.turret.AssistTurret;
 import frc.robot.commands.turret.ColumnShot;
 import frc.robot.commands.turret.ManualTurret;
@@ -84,6 +87,19 @@ public class RobotContainer {
   }
 
   private Scoreboard scoreboard;
+
+  /** 撥桿啟動的自動流程正在跑（它是在 kDisable 模式下跑的，Storage 要照常送球）。 */
+  private boolean autoRunning = false;
+
+  /**
+   * 11/19：開機時兩顆 Luna 打不到牆 → 自動開始時用「起點擺放角度」設定 IMU 的牆面基準。
+   * 車身相對九宮格牆面的偏角（度，逆時針為正，同 IMU；0 = 右 frame 正對牆）。
+   * 11/19 起 init 時車頭（Front frame）朝九宮格牆 = 從「右 frame 朝牆」順時針轉 90° → −90。
+   * 若實測轉成右 frame 朝牆後 RangeSensor/ImuYawErrorDeg 是 ±180 附近，改成 +90。
+   */
+  private final LoggedNetworkNumber startYawToWallDeg = new LoggedNetworkNumber("/Tuning/RangeSensor/StartYawToWallDeg", -90.0);
+  /** Elastic 按鈕：設 true → 以「現在車身相對牆面 = StartYawToWallDeg」設定基準，然後自動跳回 false。 */
+  private final LoggedNetworkBoolean seedWallHeadingNow = new LoggedNetworkBoolean("/Tuning/RangeSensor/SeedWallHeadingNow", false);
 
   public RobotContainer() {
     switch (Constants.kCurrentMode) {
@@ -158,10 +174,13 @@ public class RobotContainer {
     Logger.recordOutput("Mode", "disable");
     drive.setDefaultCommand(DriveCommands.arcadeDrive(drive, () -> controller.getLeftY(), () -> -controller.getLeftX()));
 
-    // L298N 上的馬達（Storage 左右 + L298N Trigger 通道）一律正轉；只靠砲台 NEO550 擊發
-    // 11/19：Manual 模式只有右開關打開（射擊狀態）時 Storage 才轉，右開關關掉就停；其他模式維持一律正轉
-    stroage.setDefaultCommand(new Normal(stroage,
-        () -> Constants.kRobotMode != RobotMode.kManual || controller.getHID().getRightSwitch()));
+    // 右開關關著：Auto／RealManual 模式一律正轉；Manual、Assist 和 kDisable（未選模式、左開關剛關掉）都停。
+    // 11/19 修 BUG：左開關關掉 → 模式變 kDisable，但 MockDS 停掉後機器人還會 enable 一小段時間，
+    // 舊條件（只排除 Manual）會讓 Storage 全部轉起來。自動流程是在 kDisable 模式下跑的，所以跑自動時照轉。
+    stroage.setDefaultCommand(new Normal(stroage, this::storageRunsByDefault));
+    // 11/19：右開關打開（射擊模式）→ Storage 和 L298N Trigger 分開控制：
+    // 偵測到射出（擊發 SparkMax 轉速掉到門檻以下）→ Trigger 轉 3 s、Storage 不動 → Storage 轉 2 s → 停
+    controller.rightSwitch().whileTrue(new ShootFeed(stroage, turret::isTriggerStopped));
 
     configureBindings();
   }
@@ -169,11 +188,17 @@ public class RobotContainer {
   private void configureBindings() {
     controller.leftSwitch().onTrue(mockDS.startMockDS()).onFalse(mockDS.stopMockDS());
 
+    new Trigger(seedWallHeadingNow::get).onTrue(Commands.runOnce(() -> {
+      seedWallHeading();
+      seedWallHeadingNow.set(false);
+    }).ignoringDisable(true));
+
     // 自動流程：撥一下就啟動（onTrue）。規則規定啟動後不能再碰遙控器，所以不能用 whileTrue（搖桿放開就會取消）。
     // 左開關關掉（MockDS 停止 → disable）時一併取消。
     controller.leftSwitch().and(lefttop()).and(isDisable())
       .onTrue(Commands.defer(
-        () -> Commands.runOnce(scoreboard::reset).andThen(buildAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true),
+        () -> Commands.runOnce(scoreboard::reset).andThen(Commands.runOnce(this::seedWallHeading)).andThen(buildAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true)
+            .beforeStarting(() -> autoRunning = true).finallyDo(() -> autoRunning = false),
         java.util.Set.of(drive, turret)
       ));
 
@@ -222,7 +247,9 @@ public class RobotContainer {
     controller.rightSwitch().and(isAssist())
       .whileTrue(
         Commands.parallel(
-          new AssistTurret(turret, FieldConstants.kSpecialTargetHeight, () -> controller.getRightY(), () -> controller.getLeftX() > 0.3),
+          // 11/19：射大洞。右搖桿 左下=高、中下=中、右下=低（記住）；右搖桿 Y 微調仰角；左搖桿往右推擊發（同 Manual）
+          new AssistTurret(turret, () -> controller.getRightY(), () -> controller.getLeftX() > 0.3,
+            leftdown(), middown(), rightdown()),
           Commands.idle(drive)
         )
       );
@@ -246,6 +273,20 @@ public class RobotContainer {
       );
     
     
+  }
+
+  /** 右開關關著時 Storage／L298N Trigger 要不要一直正轉。 */
+  /** 車子擺在已知角度（起點）時呼叫：IMU 牆面基準 = 現在角度 − StartYawToWallDeg。之後 Luna×2 一致時會再慢慢修正。 */
+  private void seedWallHeading() {
+    RangeSensors.seedWallHeading(startYawToWallDeg.get());
+  }
+
+  private boolean storageRunsByDefault() {
+    return switch (Constants.kRobotMode) {
+      case kAuto, kRealManual -> true;
+      case kManual, kAssist -> false; // 11/19：Assist 和 Manual 一樣，右開關關著就停
+      case kDisable -> autoRunning || org.wpilib.driverstation.RobotState.isAutonomous();
+    };
   }
 
   public Trigger isDisable() {

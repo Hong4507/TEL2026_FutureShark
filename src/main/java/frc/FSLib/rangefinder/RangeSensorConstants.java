@@ -34,8 +34,8 @@ public final class RangeSensorConstants {
   public static final double kBaselineMeters = 0.17072;
   /** 右 Luna 鏡頭在右 frame 內側多少（公尺）。 */
   public static final double kRightLunaInboardMeters = 0.07042;
-  /** 左 Luna 鏡頭在右 frame 內側多少（公尺）（機器人寬 0.4953 − 左 frame 內側 0.0127）。 */
-  public static final double kLeftLunaInboardMeters = 0.4826;
+  /** 左 Luna 鏡頭在右 frame 內側多少（公尺）。11/19 實測：擺正時右讀值比左多 0.15 m（右 − 左）→ 右內縮 − 0.15（負值 = 左鏡頭比右 frame 更靠牆）。 */
+  public static final double kLeftLunaInboardMeters = kRightLunaInboardMeters - 0.15;
   /**
    * DownShooter（下飛輪，固定位置）輪心在右 frame（面向九宮格那側）內側多少（公尺），垂直牆面方向的深度。
    * 11/15 實測 169.53 mm。用輪心不用出球點：Hood 調仰角時出球點會動，輪心不會。

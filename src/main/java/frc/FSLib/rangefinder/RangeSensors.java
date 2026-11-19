@@ -29,6 +29,11 @@ public final class RangeSensors {
     }
   }
 
+  /** 融合版才有作用：用目前 IMU 角度設定牆面基準，{@code yawToWallDeg} = 車身現在相對牆面的偏角（0 = 正對）。 */
+  public static synchronized void seedWallHeading(double yawToWallDeg) {
+    if (instance instanceof FusedRangeSensor fused) fused.seedWallHeading(Math.toRadians(yawToWallDeg));
+  }
+
   /** 測試用：換成假的感測器（例如依模擬位置算距離）。傳 null 恢復預設。要在建立 command 之前呼叫。 */
   public static synchronized void setForTesting(TargetRangeSensor sensor) {
     instance = sensor;

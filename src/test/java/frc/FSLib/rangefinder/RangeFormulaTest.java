@@ -15,14 +15,14 @@ class RangeFormulaTest {
   @Test
   void constantsMatchMeasuredGeometry() {
     assertEquals(0.07042, kRightLunaInboardMeters, 1e-12);
-    assertEquals(0.4826, kLeftLunaInboardMeters, 1e-12);
+    assertEquals(-0.07958, kLeftLunaInboardMeters, 1e-12);
     assertEquals(0.17072, kBaselineMeters, 1e-12);
   }
 
-  /** 測試表第 1 列：擺正時左 Luna 本來就多 0.41218 m → yaw = 0。 */
+  /** 測試表第 1 列：擺正時右 Luna 本來就多 0.15 m（11/19 實測，右 − 左） → yaw = 0。 */
   @Test
   void squareToWall() {
-    Solution s = grid(2.41218, 2.0);
+    Solution s = grid(1.85, 2.0);
     assertTrue(s.valid());
     assertEquals(0.0, s.yawRad(), 1e-9);
     assertEquals(1.92958, s.wallDistance(), EPS);
@@ -33,7 +33,7 @@ class RangeFormulaTest {
   /** 測試表第 2 列：左多 2 cm → ±6.68°，牆距 = 平均 × cos。 */
   @Test
   void tilted() {
-    Solution s = grid(2.43218, 2.0);
+    Solution s = grid(1.87, 2.0);
     double expectedYaw = Math.atan2(0.02, 0.17072) * kYawSign;
     assertEquals(Math.toRadians(6.68) * kYawSign, s.yawRad(), Math.toRadians(0.01));
     assertEquals(expectedYaw, s.yawRad(), 1e-9);
@@ -66,7 +66,7 @@ class RangeFormulaTest {
 
   @Test
   void onlyLeftValid() {
-    Solution s = DualTFLunaRangeSensor.solve(RangeReference.GRID_WALL, 2.41218, 0, true, false);
+    Solution s = DualTFLunaRangeSensor.solve(RangeReference.GRID_WALL, 1.85, 0, true, false);
     assertTrue(Double.isNaN(s.yawRad()));
     assertEquals(1.92958 - kLunaTrimMeters, s.wallDistance(), EPS);
   }
@@ -74,7 +74,7 @@ class RangeFormulaTest {
   /** getYaw 用的角度：π/2 = 正對。 */
   @Test
   void yawRadIsCenteredOnHalfPi() {
-    assertEquals(Math.PI / 2, DualTFLunaRangeSensor.yawRad(RangeReference.GRID_WALL, 2.41218, 2.0), 1e-9);
+    assertEquals(Math.PI / 2, DualTFLunaRangeSensor.yawRad(RangeReference.GRID_WALL, 1.85, 2.0), 1e-9);
   }
 
   // ===== LOW_WALL：和 11/14 版本的公式完全一樣 =====

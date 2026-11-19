@@ -139,8 +139,10 @@ public class TurretReal implements TurretIO {
       .cruiseVelocity(1)
       .maxAcceleration(5)
       .allowedProfileError(0.01);
+    // 射出偵測看擊發馬達轉速：轉速訊號不能用 optimizedAll（會變 500 ms 一筆，0.15 s 的擊發根本看不到）
     triggerMotorConfig.signals
-      .apply(SparkUtil.optimizedAllSignalConfig());
+      .apply(SparkUtil.optimizedSignalConfig())
+      .primaryEncoderVelocityPeriodMs(20);
     triggerMotor.configure(triggerMotorConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
   }
 
@@ -163,6 +165,7 @@ public class TurretReal implements TurretIO {
     inputs.downAppliedVolts = downVoltage.getValueAsDouble();
     inputs.triggerVolts = triggerMotor.getAppliedOutput().get() * triggerMotor.getBusVoltage().get();
     inputs.triggerCurrentAmps = triggerMotor.getOutputCurrent().get();
+    inputs.triggerVelocityRpm = triggerMotor.getEncoder().getVelocity().get();
     // 仰角馬達自己的 encoder（開機 = 0，正 = 馬達正轉）；和 CANcoder 比正負就知道方向有沒有反
     Logger.recordOutput("Turret/PitchMotorRot", angleMotor.getEncoder().getPosition().get());
   }

@@ -571,3 +571,42 @@ YOLO 只負責**水平對準**九宮格的某一欄；牆面角度仍由 TF-Luna
   - NT log：`LunaAuto/AlignState`、`AlignResult`（CENTERED／IN_HOLE／NOT_FOUND／BLOCKED／UNAVAILABLE）、`ScanState`、`ScanFound`、`ScanDeg`、`Auto/Stage`。
 - 模擬：`TurretLidarIOSim`（依位置射線打九宮格，光點半徑 = 斜距 × tan 1°），`./gradlew run` 預設用它（`TURRET_LIDAR_IO=nt` 改讀 NT）。
   `AutoLunaSimTest` 9 項：左右起點、起點已在洞裡、已過第一欄、被擋住後轉找（左右）、找不到不射、Luna 斷線原地射。落點誤差：沿牆找 ≤ 0.7 cm，轉找 ≤ 3.3 cm。
+
+## 測距融合修正（2026-11-19）
+
+實機狀況：Luna單邊+IMU 距離怪；兩顆 Luna 都在範圍內，卻常被切到別的模式。`Drive/Gyro/YawRad` 右轉變小、左轉變大、轉一圈繼續累積 = **正常**（WPILib 逆時針為正、連續角度；融合裡已經用 `angleModulus` 處理）。
+
+- 一致門檻 4° → 10°：基線 17 cm，讀值差 1 cm ≈ 3.4°，光雜訊就超過 4° → 一直切單邊。
+- 不一致要持續 0.15 s 才換單邊。
+- **卡死修正**：舊版只在「一致」時更新牆面基準，基準一歪（IMU 漂移、在別面牆學到、第一筆雜訊）就永遠不一致、永遠單邊。現在兩顆偏角 < 10°（看起來是平牆、沒被擋）但和 IMU 不一致超過 1 s → 重設基準（`RangeSensor/WallHeadingResets` +1）。
+- 單邊公式補沿牆偏移：牆距 = d_frame·cosθ ∓ (B/2)·sinθ（和 Luna×2 結果一致；舊版偏 15° 差約 2 cm）。
+- 換 Limelight 門檻 0.3 → 0.5 m（WidthScale 還沒校正前，視覺偏遠 >12% 就會把正常的 Luna×2 換掉）。
+- 新 NT：`RangeSensor/LunaImuDiffDeg`、`RangeSensor/WallHeadingResets`、`RangeSensor/VisionMinusLunaMeters`。
+- Elastic「狀態」頁新增「雙Luna距離」（第 5 排左邊，NT `Status/DualLunaDistance`）：永遠顯示兩顆 Luna 公式的 TargetDistance＋偏角，不受融合來源影響；只有一顆有效時顯示「左無效／右無效」。數值版 `RangeSensor/DualLunaDistance`（無效 = NaN）給 AdvantageScope 畫圖。
+
+- **IMU 牆面基準不用等 Luna×2**：開機時兩顆 Luna 打不到牆也能用單邊+IMU。自動流程開始時（車子在起點）設定基準 = 現在 IMU 角度 − `/Tuning/RangeSensor/StartYawToWallDeg`（預設 **−90** = init 時車頭朝九宮格牆；0 = 右 frame 正對牆）。IMU 說偏超過 45°（Luna 沒對著九宮格）時不拿 Luna 學習／重設基準、不用單邊+IMU。
+  手動：Elastic 把 `/Tuning/RangeSensor/SeedWallHeadingNow` 設 true（車子擺正時按）。之後 Luna×2 一致時照常慢慢修正。NT：`RangeSensor/SeedGyroYawRad`、`SeedYawToWallDeg`。
+
+## 射擊模式 Storage／Trigger 分開控制（2026-11-19）
+
+- 右開關打開（任何模式）→ `ShootFeed`：等待時 Storage、L298N Trigger 都停；偵測到射出 → L298N Trigger 轉 3 s（Storage 不動）→ Storage 轉 2 s → 停。送料中又射一發 → 重新開始。時間在 `StorageConstants.kShotFeedTriggerSec／kShotFeedStorageSec`。
+- 右開關關著：同之前（Manual 全停，其他模式一律正轉）。
+- 射出偵測改回老方法、改看轉速：擊發 SparkMax |RPM| 從高於 `kShotDetectRpm`（500，NT `/Tuning/Turret/ShotDetectRpm` 可即時調）掉到以下 = 射出一顆。取絕對值，所以 inverted 不影響（舊版 `triggerVolts < 3` 因為電壓是負的永遠成立）。
+- 擊發 SparkMax 的轉速訊號 500 ms → 20 ms（原本 optimizedAll 會把它降速，0.15 s 擊發看不到）。
+- 新 NT：`Turret/TriggerVelocityRpm`、`Turret/TriggerStopped`、`Storage/ShootFeedState`（Waiting／Trigger／Storage／Off）。
+- **BUG 修正**：左開關關掉（Disable）後 Storage 全部轉起來。原因：模式變 `kDisable`，但 MockDS 停掉後機器人還 enable 一小段時間，舊條件「不是 Manual 就轉」成立。現在右開關關著時只有 Assist／Auto／RealManual 一律正轉；Manual、`kDisable`（未選模式）都停，只有撥桿啟動的自動流程（或 DS autonomous）在跑時照轉。
+
+## ShotTable 實測寫入（2026-11-19）
+
+- `tools/measure/apply_measurements.py` 從 `shot_table_1115.csv` 寫入 kLow／kMid／kHigh 各 4 點（約 3.02～3.9 m = 會射擊的最近／最遠距離）。3.9 m 那點是砲台 Luna 斜距換算（× cos 23° + 0.1588）。
+- 範圍外 → 彈道公式＋端點修正（`ShotTable/Source` = EXTRAPOLATED），不準，盡量在範圍內射。
+- 加分格不射：kBonus 保持空白；自動流程 `/Tuning/Auto/<FIRST|SECOND>/BonusBalls` 預設 3／2 → **0**（仍會對準亮燈那欄再射低／中／高）。
+- Assist 模式 L298N 馬達改成和 Manual 一樣：右開關關著 Storage／Trigger 都停，右開關開 → ShootFeed。
+
+## Assist 模式改射大洞（2026-11-19）
+
+- `AssistTurret`：目標從加分格改成大洞，仰角 = ShotTable（依車身 Luna 距離）+ 微調。
+- 右搖桿選列（推進去就記住，預設中列）：**左下 = 高、中下 = 中、右下 = 低**（⚠️ 和 Auto 模式的左下=低、右下=高相反）。
+- 右搖桿 Y 微調仰角 ±0.1 rad（放開回 0）；搖桿在選列區時不微調。
+- 左搖桿 X 往右推擊發，同 Manual：推下去那一刻擊發 0.15 s，要再射就放開再推（舊版按住會一直擊發、而且要飛輪到速才射）。
+- 有設 `setAimHeight` → 記分板知道是哪一列。NT：`Assist/Row`、`Assist/AdjustRad`、`Assist/PitchRad`、`Assist/AtSpeed`。

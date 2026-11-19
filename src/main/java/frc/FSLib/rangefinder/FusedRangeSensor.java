@@ -58,10 +58,24 @@ public class FusedRangeSensor implements TargetRangeSensor {
     Logger.recordOutput("RangeSensor/VisionDistance", vision.orElse(Double.NaN));
     Logger.recordOutput("RangeSensor/WallHeadingRad", fusion.getWallHeading());
     Logger.recordOutput("RangeSensor/ImuYawErrorDeg", Math.toDegrees(result.yawRad()));
+    // 11/19 診斷：|這個| > 10° 持續 0.15 s 才會切單邊；一直很大 → 看 kYawSign／IMU 方向
+    Logger.recordOutput("RangeSensor/LunaImuDiffDeg", Math.toDegrees(fusion.getLunaImuDiffRad()));
+    Logger.recordOutput("RangeSensor/WallHeadingResets", fusion.getWallHeadingResets());
+    // > 0.5 m 持續 0.2 s 會切 Limelight：Luna 正常時這個很大 = 視覺距離沒校正
+    Logger.recordOutput("RangeSensor/VisionMinusLunaMeters", vision.orElse(Double.NaN) - lunaOnly);
     // 11/19 校正視覺距離用：Luna×2 時 Luna ÷ 視覺，乘上目前的 /Tuning/Vision/WidthScale 就是新值
     Logger.recordOutput("Vision/DistanceRatio", vision.isPresent() && result.source() == RangeFusion.Source.LUNA_DUAL
         ? lunaOnly / vision.getAsDouble() : Double.NaN);
     return result;
+  }
+
+  /** 用現在的 IMU 角度＋已知的相對牆面偏角設定牆面基準（見 {@link RangeFusion#seedWallHeading}）。 */
+  public void seedWallHeading(double yawToWallRad) {
+    double gyro = gyroYawRad.getAsDouble();
+    fusion.seedWallHeading(gyro, yawToWallRad);
+    cachedTime = Double.NEGATIVE_INFINITY;
+    Logger.recordOutput("RangeSensor/SeedGyroYawRad", gyro);
+    Logger.recordOutput("RangeSensor/SeedYawToWallDeg", Math.toDegrees(yawToWallRad));
   }
 
   public RangeFusion.Source getSource() {

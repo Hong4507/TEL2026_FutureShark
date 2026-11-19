@@ -46,7 +46,7 @@ public final class AutoRoutines {
     /** 下半場：規則上限加分格 2 顆、每格 2 顆（連線另計，換欄交給手動）。 */
     SECOND(2, 2);
 
-    /** 規則上限（算分的最多顆數），也是預設發數。 */
+    /** 規則上限（算分的最多顆數）。holeCap 也是每洞預設發數；加分格預設 0 發（不射）。 */
     public final int bonusCap;
     public final int holeCap;
 
@@ -56,7 +56,8 @@ public final class AutoRoutines {
     Half(int bonusCap, int holeCap) {
       this.bonusCap = bonusCap;
       this.holeCap = holeCap;
-      this.bonusBalls = new LoggedNetworkNumber("/Tuning/Auto/" + name() + "/BonusBalls", bonusCap);
+      // 11/19：我們不射加分格 → 預設 0 發（還是會對準亮燈那欄，接著射那欄的低／中／高）。要射再到 Elastic 改
+      this.bonusBalls = new LoggedNetworkNumber("/Tuning/Auto/" + name() + "/BonusBalls", 0);
       this.ballsPerHole = new LoggedNetworkNumber("/Tuning/Auto/" + name() + "/BallsPerHole", holeCap);
     }
 

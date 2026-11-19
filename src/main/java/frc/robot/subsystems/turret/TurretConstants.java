@@ -55,6 +55,12 @@ public class TurretConstants {
 
   public static final double kMaxSpeedRadPerSec = 565;
 
+  /**
+   * 射出偵測（老方法，改看轉速）：擊發 SparkMax 轉速（|RPM|）從高於這個值掉到低於這個值 = 剛射出一顆。
+   * 可以在 NT {@code /Tuning/Turret/ShotDetectRpm} 即時調；看 {@code Turret/TriggerVelocityRpm} 擊發時衝到多少再決定。
+   */
+  public static final double kShotDetectRpm = 500;
+
   public static final Translation3d kTurretToRobotCenter = new Translation3d(0.125, -0.04, 0.52);
   public static final Transform3d kTurretToRobotCenterTransform = new Transform3d(kTurretToRobotCenter, new Rotation3d(0, 0, -Math.PI / 2));
 

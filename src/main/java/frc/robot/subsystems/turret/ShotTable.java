@@ -31,12 +31,24 @@ public final class ShotTable {
 
   /** 低列（kLowTargetHeight）。 */
   static final double[][] kLow = {
+    {3.040, 1.3350},  // 5/5
+    {3.230, 1.3320},  // 5/5
+    {3.300, 1.3500},  // 5/5
+    {3.905, 1.3744},  // 5/5
   };
   /** 中列（kMidTargetHeight）。 */
   static final double[][] kMid = {
+    {3.020, 1.1330},  // 5/5
+    {3.270, 1.1900},  // 5/5
+    {3.480, 1.1940},  // 5/5
+    {3.905, 1.2298},  // 5/5
   };
   /** 高列（kHighTargetHeight）。 */
   static final double[][] kHigh = {
+    {3.040, 0.9610},  // 5/5
+    {3.480, 1.0390},  // 4/5
+    {3.800, 1.0820},  // 5/5
+    {3.887, 1.0915},  // 5/5
   };
   /** 加分格（kSpecialTargetHeight）。 */
   static final double[][] kBonus = {

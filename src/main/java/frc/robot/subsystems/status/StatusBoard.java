@@ -136,6 +136,24 @@ public class StatusBoard extends SubsystemBase {
     TargetRangeSensor rs = RangeSensors.get();
     String source = rs instanceof frc.FSLib.rangefinder.FusedRangeSensor f ? " " + f.getSource().label : "";
     Logger.recordOutput("Status/Distance", String.format(Locale.ROOT, "%.2f m%s", rs.getTargetDistance(), source));
+    // 雙Luna距離：不管融合現在用哪個來源，永遠顯示兩顆 Luna 公式算的值（對照用）
+    frc.FSLib.rangefinder.DualTFLunaRangeSensor luna =
+        rs instanceof frc.FSLib.rangefinder.FusedRangeSensor f ? f.luna()
+            : rs instanceof frc.FSLib.rangefinder.DualTFLunaRangeSensor d ? d : null;
+    String dualText = "—";
+    double dualMeters = Double.NaN;
+    if (luna != null) {
+      var r = luna.getReading();
+      if (r.leftValid() && r.rightValid()) {
+        var sol = frc.FSLib.rangefinder.DualTFLunaRangeSensor.solve(r.left(), r.right(), true, true);
+        dualMeters = sol.targetDistance();
+        dualText = String.format(Locale.ROOT, "%.3f m  偏 %+.1f°", dualMeters, Math.toDegrees(sol.yawRad()));
+      } else {
+        dualText = !r.leftValid() && !r.rightValid() ? "兩顆都無效" : !r.leftValid() ? "左無效" : "右無效";
+      }
+    }
+    Logger.recordOutput("Status/DualLunaDistance", dualText);
+    Logger.recordOutput("RangeSensor/DualLunaDistance", dualMeters);
     // TF-Luna 前方範圍內沒東西或訊號太弱時回傳 0，不能直接顯示 0（看起來像貼著東西）
     String lidarText = !turretLidar.isConnected() ? "未連線"
         : turretLidar.getDistanceMeters().isPresent()

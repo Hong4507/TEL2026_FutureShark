@@ -1,6 +1,7 @@
 package frc.robot.subsystems.turret;
 
 import org.littletonrobotics.junction.Logger;
+import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
 
 import org.wpilib.command2.SubsystemBase;
 import org.wpilib.command2.button.Trigger;
@@ -16,6 +17,9 @@ public class Turret extends SubsystemBase {
   private double lastShotAimHeightMeters = Double.NaN;
   private boolean triggerOn = false;
 
+  private static final LoggedNetworkNumber shotDetectRpm =
+      new LoggedNetworkNumber("/Tuning/Turret/ShotDetectRpm", TurretConstants.kShotDetectRpm);
+
   public Turret(TurretIO io) {
     this.io = io;
   }
@@ -24,6 +28,7 @@ public class Turret extends SubsystemBase {
   public void periodic() {
     io.updateInputs(inputs);
     Logger.processInputs("Turret", inputs);
+    Logger.recordOutput("Turret/TriggerStopped", isTriggerStopped());
   }
 
   public void setVelocity(double upVelocityRadPerSec, double downVelocityRadPerSec) {
@@ -90,14 +95,20 @@ public class Turret extends SubsystemBase {
     return lastShotAimHeightMeters;
   }
 
+  /** 擊發 SparkMax 轉速（|RPM|）低於 {@link TurretConstants#kShotDetectRpm} = 停著。 */
+  public boolean isTriggerStopped() {
+    return Math.abs(inputs.triggerVelocityRpm) < shotDetectRpm.get();
+  }
+
   /**
-   * 扳機「通電 → 斷電」的那一刻 = 剛射完一顆，搭配 onTrue 觸發 Storage 補球。
+   * 射出偵測（老方法）：看擊發 SparkMax 轉速是否低於門檻。搭配 onTrue／上升緣用：
+   * 轉速從高於門檻掉到低於門檻的那一刻 = 剛射出一顆。
    *
-   * <p>用程式下的指令（triggerOn）判斷，不用 SparkMax 回報的電壓：扳機馬達設了 inverted，
-   * 回報的電壓可能是負的，永遠 &lt; 3，onTrue 就永遠不會觸發，Storage 一直停在整理球模式。
+   * <p>不用回報電壓（舊版 {@code triggerVolts < 3}）：扳機設了 inverted，電壓是負的，永遠 &lt; 3。
+   * 轉速取絕對值就沒有這個問題。
    */
   public Trigger ballFired() {
-    return new Trigger(() -> !triggerOn);
+    return new Trigger(this::isTriggerStopped);
   }
 
 }
