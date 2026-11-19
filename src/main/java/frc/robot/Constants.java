@@ -33,6 +33,8 @@ public class Constants {
     kRealManual,
     kAssist,
     kAuto,
+    /** 11/19：左開關打開時右搖桿右上 → L298N 上的 Storage＋Trigger 不停正轉（清球／整理用）。不轉飛輪、不能開車。 */
+    kFeed,
     kDisable
   }
 

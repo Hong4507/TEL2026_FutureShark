@@ -12,6 +12,7 @@ import org.wpilib.command2.Commands;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 
 import frc.FSLib.rangefinder.RangeSensors;
+import frc.robot.commands.drive.DriveDistance;
 import frc.robot.commands.drive.LaserAlign;
 import frc.robot.commands.drive.LidarHoleAlign;
 import frc.robot.commands.drive.LidarTurnScan;
@@ -34,6 +35,14 @@ import frc.robot.subsystems.vision.Vision.Column;
  */
 public final class AutoRoutines {
   private AutoRoutines() {}
+
+  /**
+   * 11/19：自動流程射擊距離（= RangeSensor/TargetDistance，DownShooter 輪心到九宮格），最佳射程 3 m。
+   * 起點車頭朝九宮格時，自動開始會先轉 90° 量距離，差超過 {@link #kShootDistanceToleranceMeters} 就轉回去前後走到這個距離。
+   * 砲台 Luna（23°）在 TargetDistance 3.27 m 時光束打中列中心、有效 2.92–3.62 m；3.0 m 光束打在中列洞偏下，洞比較窄。
+   */
+  private static final LoggedNetworkNumber kShootDistance = new LoggedNetworkNumber("/Tuning/Auto/ShootDistanceMeters", 3.0);
+  private static final double kShootDistanceToleranceMeters = 0.05;
 
   /** 等亮燈加分格出現的最長時間（秒）。超過就當作燈沒亮 / 辨識不到，改打中欄、不打加分格。 */
   public static final double kLitWaitSeconds = 2.0;
@@ -168,10 +177,31 @@ public final class AutoRoutines {
         : bonusThenColumn(drive, vision, turret, plan);
     boolean needsTurn = Math.abs(startYawToWallDeg) > 1 && (plan.method() == AutoMethod.LUNA || !plan.runPath());
     if (!needsTurn) return main;
+    double yaw = Math.toRadians(startYawToWallDeg);
+    // 車頭方向往牆的分量（−90 → 1：車頭朝牆；+90 → −1：車尾朝牆）
+    double towardWall = Math.cos(-Math.PI / 2 - yaw);
+    double[] measured = {Double.NaN};
     return Commands.sequence(
       log("TurnToWall"),
-      Commands.parallel(Commands.runOnce(() -> spinUp(turret)),
-          new TurnByAngle(drive, Math.toRadians(-startYawToWallDeg))),
+      Commands.parallel(Commands.runOnce(() -> spinUp(turret)), new TurnByAngle(drive, -yaw)),
+      // 11/19：最佳射程 ShootDistanceMeters（TargetDistance，預設 3.0 m）。Luna 只能朝右側量，所以轉過來量完再轉回去走
+      Commands.waitSeconds(0.3),
+      Commands.runOnce(() -> {
+        var rs = RangeSensors.get();
+        measured[0] = rs.getWallDistanceMeters().isPresent() ? rs.getTargetDistance() : Double.NaN;
+        Logger.recordOutput("Auto/StartDistanceMeters", measured[0]);
+      }),
+      Commands.either(
+        Commands.sequence(
+          log("DriveToRange"),
+          new TurnByAngle(drive, yaw),
+          new DriveDistance(drive, () -> (measured[0] - kShootDistance.get()) / towardWall),
+          new TurnByAngle(drive, -yaw)
+        ),
+        Commands.none(),
+        () -> Double.isFinite(measured[0]) && Math.abs(towardWall) > 0.5
+            && Math.abs(measured[0] - kShootDistance.get()) > kShootDistanceToleranceMeters
+      ),
       log("SquareUp"),
       new LaserAlign(drive),
       main

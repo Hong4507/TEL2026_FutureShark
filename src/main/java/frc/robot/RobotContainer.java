@@ -180,8 +180,8 @@ public class RobotContainer {
     Logger.recordOutput("Mode", "disable");
     // Assist 射擊中（右開關開）左搖桿 X 是擊發 → 底盤不吃搖桿，避免一擊發就轉向
     drive.setDefaultCommand(DriveCommands.arcadeDrive(drive,
-        () -> assistShooting() ? 0 : controller.getLeftY(),
-        () -> assistShooting() ? 0 : -controller.getLeftX()));
+        () -> holdDrive() ? 0 : controller.getLeftY(),
+        () -> holdDrive() ? 0 : -controller.getLeftX()));
 
     // 右開關關著：Auto／RealManual 模式一律正轉；Manual、Assist 和 kDisable（未選模式、左開關剛關掉）都停。
     // 11/19 修 BUG：左開關關掉 → 模式變 kDisable，但 MockDS 停掉後機器人還會 enable 一小段時間，
@@ -190,7 +190,7 @@ public class RobotContainer {
     // 11/19：右開關打開（射擊模式）→ Storage 和 L298N Trigger 分開控制：
     // 偵測到射出（擊發 SparkMax 轉速掉到門檻以下）→ Trigger＋Storage 一起轉 kShotFeedTriggerSec（2 s）
     // → Storage 停、Trigger 繼續轉 kShotFeedStorageSec（0.7 s）→ 停
-    controller.rightSwitch().whileTrue(new ShootFeed(stroage, turret::isTriggerStopped));
+    controller.rightSwitch().and(isFeed().negate()).whileTrue(new ShootFeed(stroage, turret::isTriggerStopped));
 
     configureBindings();
   }
@@ -225,6 +225,13 @@ public class RobotContainer {
         Logger.recordOutput("Mode", "Assist");
       }).ignoringDisable(true)
     );
+    // 11/19：右搖桿右上 → 送球模式（Storage＋L298N Trigger 不停正轉；左開關關掉就停）
+    controller.leftSwitch().and(righttop()).and(isDisable())
+      .onTrue(Commands.runOnce(() -> {
+        Constants.kRobotMode = RobotMode.kFeed;
+        Logger.recordOutput("Mode", "Feed");
+      }).ignoringDisable(true)
+    );
     controller.leftSwitch().and(middown()).and(isDisable())
       .onTrue(Commands.runOnce(() -> {
         Constants.kRobotMode = RobotMode.kAuto;
@@ -235,7 +242,7 @@ public class RobotContainer {
     // isDisable 時 lefttop 是啟動自動流程用的，不能同時觸發 LaserAlign（兩個都要 drive，會互相打斷）
     // 11/19：右搖桿左上 = 對齊（Elastic「對齊方式」選：砲台Luna找洞／VisionAlign／LaserAlign）。
     // 只要求底盤，所以 Assist／Auto 模式射擊中按也不會中斷射擊。
-    isManual().negate().and(isRealManual().negate()).and(isDisable().negate()).and(lefttop())
+    isManual().negate().and(isRealManual().negate()).and(isDisable().negate()).and(isFeed().negate()).and(lefttop())
       .onTrue(Commands.defer(this::buildAlign, java.util.Set.of(drive)));
 
     // 11/19：Auto 模式選列和 Assist 一樣：左下 = 低、右下 = 中、右上 = 高；正下 = 低中高各 2 發（搖桿要按住到射完）
@@ -298,9 +305,14 @@ public class RobotContainer {
     return Constants.kRobotMode == RobotMode.kAssist && controller.getHID().getRightSwitch();
   }
 
+  /** 底盤不吃搖桿：Assist 射擊中（左搖桿 X 是擊發）、送球模式。 */
+  private boolean holdDrive() {
+    return assistShooting() || Constants.kRobotMode == RobotMode.kFeed;
+  }
+
   private boolean storageRunsByDefault() {
     return switch (Constants.kRobotMode) {
-      case kAuto, kRealManual -> true;
+      case kAuto, kRealManual, kFeed -> true;
       case kManual, kAssist -> false; // 11/19：Assist 和 Manual 一樣，右開關關著就停
       case kDisable -> autoRunning || org.wpilib.driverstation.RobotState.isAutonomous();
     };
@@ -312,6 +324,10 @@ public class RobotContainer {
 
   public Trigger isManual() {
     return new Trigger(() -> Constants.kRobotMode == RobotMode.kManual);
+  }
+
+  public Trigger isFeed() {
+    return new Trigger(() -> Constants.kRobotMode == RobotMode.kFeed);
   }
 
   public Trigger isRealManual() {

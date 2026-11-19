@@ -94,6 +94,13 @@ class AutoLunaSimTest {
   }
 
   private Run run(StartSide side, double startY, TurretLidarIO lidarIO, double startHeadingDeg, double startYawToWallDeg) {
+    return run(side, startY, lidarIO, startHeadingDeg, startYawToWallDeg, TurretLidar.idealHorizontalMeters(1));
+  }
+
+  private double endTargetDistance = Double.NaN;
+
+  private Run run(StartSide side, double startY, TurretLidarIO lidarIO, double startHeadingDeg, double startYawToWallDeg,
+      double startHorizontal) {
     drive = new Drive(new DriveIOSim(), new GyroIO() {}) {
       @Override
       public void setVelocity(double left, double right) {
@@ -110,7 +117,7 @@ class AutoLunaSimTest {
         super.setVelocity(left, right);
       }
     };
-    double x = kTargetX - TurretLidar.idealHorizontalMeters(1);
+    double x = kTargetX - startHorizontal;
     drive.setPose(new Pose2d(x, startY, Rotation2d.fromDegrees(startHeadingDeg)));
     RangeSensors.setForTesting(new TargetRangeSensor() {
       @Override
@@ -153,6 +160,7 @@ class AutoLunaSimTest {
       t += kDt;
     }
     double heading = drive.getPose().getRotation().getDegrees();
+    endTargetDistance = wallDistance() + RangeSensorConstants.kShooterInboardMeters;
     System.out.printf("== %s y0=%.2f 擋=%.2f：%.1f s，%d 發，結束朝向 %.1f°，落點 %s%n", side, startY, blockY, t,
         shots.size(), heading, shots.stream().map(v -> String.format("%.3f", v)).toList());
     assertTrue(t < 60, "60 秒內沒跑完");
@@ -245,5 +253,15 @@ class AutoLunaSimTest {
     Run r = run(side, startY, new TurretLidarIOSim(() -> drive.getPose(), boxBehind));
     assertAllAt(r.shots, 9, expectedY);
     for (double v : r.shots) assertEquals(expectedY, v, 0.03, "停在洞中間");
+  }
+
+  /** 11/19：車頭朝九宮格、離很遠 → 轉 90° 量距離 → 轉回去開到 TargetDistance 3.0 m → 轉 90° → 找洞射 9 發。 */
+  @ParameterizedTest(name = "車頭朝九宮格、鏡頭到板面 {0} m → 開到 3.0 m 射擊")
+  @CsvSource({"3.70", "3.20", "2.70"})
+  void driveToShootDistanceFirst(double startHorizontal) {
+    Run r = run(StartSide.RIGHT, 0.40, new TurretLidarIOSim(() -> drive.getPose()), 0, -90, startHorizontal);
+    assertEquals(3.0, endTargetDistance, 0.05, "射擊距離");
+    assertAllAt(r.shots, 9, kRightTargetY);
+    assertEquals(90, r.endHeadingDeg, 2);
   }
 }
