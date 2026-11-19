@@ -29,6 +29,8 @@ public class ShootFeed extends Command {
   private final Timer timer = new Timer();
   private boolean lastStopped;
   private boolean feeding;
+  /** 診斷：這次右開關打開後偵測到幾發。比 Assist/FireCount 少 = 偵測漏掉，Storage 沒送球。 */
+  private int detected;
 
   public ShootFeed(Stroage stroage, BooleanSupplier triggerStopped) {
     this.stroage = stroage;
@@ -41,6 +43,7 @@ public class ShootFeed extends Command {
     // 進入射擊模式時擊發馬達本來就停著，不能算成一發
     lastStopped = triggerStopped.getAsBoolean();
     feeding = false;
+    detected = 0;
     timer.stop();
     stop();
   }
@@ -51,7 +54,9 @@ public class ShootFeed extends Command {
     if (stopped && !lastStopped) {
       feeding = true;
       timer.restart();
+      detected++;
     }
+    Logger.recordOutput("Storage/ShotsDetected", detected);
     lastStopped = stopped;
 
     String state;

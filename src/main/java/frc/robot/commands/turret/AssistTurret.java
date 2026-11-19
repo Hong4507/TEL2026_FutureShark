@@ -51,6 +51,8 @@ public class AssistTurret extends Command {
 
   private final Timer triggerTimer = new Timer();
   private boolean lastFire = false;
+  /** 診斷：這次進入 Assist 後擊發了幾次（左搖桿推一次 = 1）。 */
+  private int fireCount = 0;
   /** 選的列在指令重新開始（右開關關掉再打開）時保留。 */
   private Row row = Row.MID;
 
@@ -78,6 +80,7 @@ public class AssistTurret extends Command {
     triggerTimer.reset();
     // 進入時左搖桿已經推著 → 不算擊發，要放開再推
     lastFire = fireSupplier.getAsBoolean();
+    fireCount = 0;
   }
 
   @Override
@@ -97,7 +100,15 @@ public class AssistTurret extends Command {
     turret.setPitch(pitch);
 
     boolean fire = fireSupplier.getAsBoolean();
-    if (fire && !lastFire) triggerTimer.restart();
+    if (fire && !lastFire) {
+      triggerTimer.restart();
+      fireCount++;
+      // 診斷「射 3 發就停」：每次擊發記下當時的飛輪轉速、電池電壓
+      Logger.recordOutput("Assist/FireUpRadPerSec", turret.getUpVelocityRadPerSec());
+      Logger.recordOutput("Assist/FireBatteryVolts", org.wpilib.system.RobotController.getBatteryVoltage());
+    }
+    Logger.recordOutput("Assist/FireCount", fireCount);
+    Logger.recordOutput("Assist/FireInput", fire);
     lastFire = fire;
     if (triggerTimer.isRunning()) {
       turret.setTrigger(triggerTimer.get() < kTriggerSeconds ? 12 : 0);

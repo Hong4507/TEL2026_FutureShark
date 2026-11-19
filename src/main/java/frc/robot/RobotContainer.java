@@ -227,7 +227,17 @@ public class RobotContainer {
     isManual().negate().and(isRealManual().negate()).and(isDisable().negate()).and(lefttop())
       .onTrue(new LaserAlign(drive));
 
+    // 11/19：Auto 模式選列和 Assist 一樣：左下 = 低、右下 = 中、右上 = 高；正下 = 低中高各 2 發（搖桿要按住到射完）
+    controller.rightSwitch().and(isAuto()).and(leftdown())
+      .whileTrue(new ColumnShot(turret, FieldConstants.kLowTargetHeight, 1));
+
+    controller.rightSwitch().and(isAuto()).and(rightdown())
+      .whileTrue(new ColumnShot(turret, FieldConstants.kMidTargetHeight, 1));
+
     controller.rightSwitch().and(isAuto()).and(righttop())
+      .whileTrue(new ColumnShot(turret, FieldConstants.kHighTargetHeight, 1));
+
+    controller.rightSwitch().and(isAuto()).and(middown())
       .whileTrue(
         Commands.sequence(
           new ColumnShot(turret, FieldConstants.kLowTargetHeight, 2),
@@ -235,15 +245,6 @@ public class RobotContainer {
           new ColumnShot(turret, FieldConstants.kHighTargetHeight, 2)
         )
       );
-
-    controller.rightSwitch().and(isAuto()).and(leftdown())
-      .whileTrue(new ColumnShot(turret, FieldConstants.kLowTargetHeight, 1));
-    
-    controller.rightSwitch().and(isAuto()).and(middown())
-      .whileTrue(new ColumnShot(turret, FieldConstants.kMidTargetHeight, 1));
-      
-    controller.rightSwitch().and(isAuto()).and(rightdown())
-      .whileTrue(new ColumnShot(turret, FieldConstants.kHighTargetHeight, 1));
 
     controller.rightSwitch().and(isAssist())
       .whileTrue(
