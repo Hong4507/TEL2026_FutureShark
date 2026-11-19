@@ -12,8 +12,10 @@ import org.wpilib.command2.Commands;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 
 import frc.FSLib.rangefinder.RangeSensors;
+import frc.robot.commands.drive.LaserAlign;
 import frc.robot.commands.drive.LidarHoleAlign;
 import frc.robot.commands.drive.LidarTurnScan;
+import frc.robot.commands.drive.TurnByAngle;
 import frc.robot.commands.drive.VisionAlign;
 import frc.robot.commands.turret.ColumnShot;
 import frc.robot.subsystems.drive.Drive;
@@ -151,9 +153,29 @@ public final class AutoRoutines {
 
   /** 依 {@link Plan#method()} 產生自動流程。 */
   public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Plan plan) {
-    return plan.method() == AutoMethod.LUNA
+    return build(drive, vision, turret, turretLidar, plan, 0);
+  }
+
+  /**
+   * @param startYawToWallDeg 起點擺放時車身相對「右側正對九宮格」的偏角（度，逆時針為正；同 {@code /Tuning/RangeSensor/StartYawToWallDeg}）。
+   *     11/19 起車頭朝九宮格 = −90。不是 0 時，先原地轉 −startYawToWallDeg 讓右側朝九宮格、再 LaserAlign 擺正
+   *     （Luna 找洞和「不跑路徑」的視覺流程都假設右側朝九宮格；跑 PathPlanner 路徑時由路徑決定，不額外轉）。
+   */
+  public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Plan plan,
+      double startYawToWallDeg) {
+    Command main = plan.method() == AutoMethod.LUNA
         ? lunaColumn(drive, turret, turretLidar, plan)
         : bonusThenColumn(drive, vision, turret, plan);
+    boolean needsTurn = Math.abs(startYawToWallDeg) > 1 && (plan.method() == AutoMethod.LUNA || !plan.runPath());
+    if (!needsTurn) return main;
+    return Commands.sequence(
+      log("TurnToWall"),
+      Commands.parallel(Commands.runOnce(() -> spinUp(turret)),
+          new TurnByAngle(drive, Math.toRadians(-startYawToWallDeg))),
+      log("SquareUp"),
+      new LaserAlign(drive),
+      main
+    ).withName(main.getName());
   }
 
   /**

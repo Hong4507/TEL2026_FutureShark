@@ -179,7 +179,8 @@ public class RobotContainer {
     // 舊條件（只排除 Manual）會讓 Storage 全部轉起來。自動流程是在 kDisable 模式下跑的，所以跑自動時照轉。
     stroage.setDefaultCommand(new Normal(stroage, this::storageRunsByDefault));
     // 11/19：右開關打開（射擊模式）→ Storage 和 L298N Trigger 分開控制：
-    // 偵測到射出（擊發 SparkMax 轉速掉到門檻以下）→ Trigger 轉 3 s、Storage 不動 → Storage 轉 2 s → 停
+    // 偵測到射出（擊發 SparkMax 轉速掉到門檻以下）→ Trigger＋Storage 一起轉 kShotFeedTriggerSec（2 s）
+    // → Storage 停、Trigger 繼續轉 kShotFeedStorageSec（0.7 s）→ 停
     controller.rightSwitch().whileTrue(new ShootFeed(stroage, turret::isTriggerStopped));
 
     configureBindings();
@@ -247,9 +248,9 @@ public class RobotContainer {
     controller.rightSwitch().and(isAssist())
       .whileTrue(
         Commands.parallel(
-          // 11/19：射大洞。右搖桿 左下=高、中下=中、右下=低（記住）；右搖桿 Y 微調仰角；左搖桿往右推擊發（同 Manual）
+          // 11/19：射大洞。右搖桿 左下=低、右下=中、右上=高（記住）；右搖桿 Y 微調仰角；左搖桿往右推擊發（同 Manual）
           new AssistTurret(turret, () -> controller.getRightY(), () -> controller.getLeftX() > 0.3,
-            leftdown(), middown(), rightdown()),
+            righttop(), rightdown(), leftdown()),
           Commands.idle(drive)
         )
       );
@@ -339,7 +340,7 @@ public class RobotContainer {
 
   /** 依選單產生新的自動流程指令（同一個指令物件不能重複組合，所以每次都重建）。 */
   private Command buildAuto() {
-    return AutoRoutines.build(drive, vision, turret, turretLidar, currentPlan());
+    return AutoRoutines.build(drive, vision, turret, turretLidar, currentPlan(), startYawToWallDeg.get());
   }
 
   /**

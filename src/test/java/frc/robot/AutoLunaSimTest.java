@@ -90,6 +90,10 @@ class AutoLunaSimTest {
   private record Run(List<Double> shots, double seconds, double endHeadingDeg) {}
 
   private Run run(StartSide side, double startY, TurretLidarIO lidarIO) {
+    return run(side, startY, lidarIO, 90, 0);
+  }
+
+  private Run run(StartSide side, double startY, TurretLidarIO lidarIO, double startHeadingDeg, double startYawToWallDeg) {
     drive = new Drive(new DriveIOSim(), new GyroIO() {}) {
       @Override
       public void setVelocity(double left, double right) {
@@ -107,7 +111,7 @@ class AutoLunaSimTest {
       }
     };
     double x = kTargetX - TurretLidar.idealHorizontalMeters(1);
-    drive.setPose(new Pose2d(x, startY, Rotation2d.fromDegrees(90)));
+    drive.setPose(new Pose2d(x, startY, Rotation2d.fromDegrees(startHeadingDeg)));
     RangeSensors.setForTesting(new TargetRangeSensor() {
       @Override
       public double getTargetDistance() {
@@ -139,7 +143,7 @@ class AutoLunaSimTest {
     };
 
     Plan plan = new Plan(Half.FIRST, side, false, TargetColumn.MID, AutoMethod.LUNA);
-    Command auto = AutoRoutines.build(drive, null, turret, lidar, plan);
+    Command auto = AutoRoutines.build(drive, null, turret, lidar, plan, startYawToWallDeg);
     CommandScheduler.getInstance().schedule(auto);
     double t = 0;
     while (auto.isScheduled() && t < 60) {
@@ -215,5 +219,17 @@ class AutoLunaSimTest {
     Run r = run(StartSide.RIGHT, 0.80, new TurretLidarIO() {});
     assertEquals(9, r.shots.size());
     assertEquals(0.80 + 0.3, r.shots.get(0), 0.1);
+  }
+
+  /** 11/19：起點車頭朝九宮格（StartYawToWallDeg = −90）→ 先逆時針轉 90° 讓右側朝九宮格，再找洞射 9 發。 */
+  @ParameterizedTest(name = "車頭朝九宮格 {0} 從 y={1} 出發 → 欄 y={2}")
+  @CsvSource({
+    "RIGHT, 0.40, 1.1",
+    "LEFT,  3.60, 2.9",
+  })
+  void frontToGridTurnsFirst(StartSide side, double startY, double expectedY) {
+    Run r = run(side, startY, new TurretLidarIOSim(() -> drive.getPose()), 0, -90);
+    assertAllAt(r.shots, 9, expectedY);
+    assertEquals(90, r.endHeadingDeg, 2, "轉完右側朝九宮格");
   }
 }

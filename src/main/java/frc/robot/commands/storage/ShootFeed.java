@@ -14,8 +14,8 @@ import frc.robot.subsystems.storage.Stroage;
  *
  * <ol>
  *   <li>等待：兩個都停。</li>
- *   <li>偵測到射出（擊發 SparkMax 轉速掉到門檻以下的那一刻）→ L298N Trigger 轉 {@code kShotFeedTriggerSec} 秒，Storage 不動。</li>
- *   <li>Trigger 停 → Storage 轉 {@code kShotFeedStorageSec} 秒。</li>
+ *   <li>偵測到射出（擊發 SparkMax 轉速掉到門檻以下的那一刻）→ L298N Trigger 和 Storage <b>一起轉</b> {@code kShotFeedTriggerSec} 秒。</li>
+ *   <li>Storage 停、L298N Trigger <b>繼續轉</b> {@code kShotFeedStorageSec} 秒。</li>
  *   <li>回到等待。</li>
  * </ol>
  * 送料途中又射一發 → 從第 2 步重新開始。右開關關掉 → 指令結束，全部停止。
@@ -57,16 +57,17 @@ public class ShootFeed extends Command {
     String state;
     double t = timer.get();
     if (feeding && t < kShotFeedTriggerSec) {
-      // stroage.disableStorage();
+      // 第 1 段：Trigger＋Storage 一起轉
       stroage.setTriggerDirection(true);
       stroage.setStorageSpeed(1);
       stroage.setTriggerSpeed(1);
-      state = "Trigger";
+      state = "Trigger+Storage";
     } else if (feeding && t < kShotFeedTriggerSec + kShotFeedStorageSec) {
+      // 第 2 段：Storage 停、Trigger 繼續轉
       stroage.disableStorage();
       stroage.setStorageDirection(true);
       stroage.setTriggerSpeed(1);
-      state = "Storage";
+      state = "TriggerOnly";
     } else {
       feeding = false;
       stop();

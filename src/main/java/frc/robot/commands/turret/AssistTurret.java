@@ -19,7 +19,8 @@ import frc.robot.subsystems.turret.TurretConstants;
  * Assist 模式（11/19 改）：射大洞，仰角依車身 Luna 距離查 ShotTable 自動調整。
  *
  * <ul>
- *   <li>右搖桿選列（推進去就記住，放開後維持）：左下 = 高（Top）、中下 = 中（Mid）、右下 = 低（Low）。預設中列。</li>
+ *   <li>右搖桿選列（推進去就記住，放開後維持）：左下 = 低（Low）、右下 = 中（Mid）、右上 = 高（Top）。預設中列。
+ *       正下方不選列，所以 Y 推到底微調仰角也不會換列。</li>
  *   <li>右搖桿 Y 微調仰角 ±{@link #kAdjustRad} rad（放開回到 0）。搖桿在選列區時不微調，選列不會順便把仰角往下拉。</li>
  *   <li>左搖桿 X 往右推 = 擊發一次（和 Manual 一樣：推下去的那一刻擊發 {@link #kTriggerSeconds} 秒，要再射就放開再推）。</li>
  * </ul>
