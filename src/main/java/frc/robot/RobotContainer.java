@@ -77,7 +77,7 @@ public class RobotContainer {
   /** 11/15：砲台 Luna 找洞（不用視覺，預設）或原本的視覺流程。 */
   private final LoggedNetworkChooser<AutoMethod> autoMethodChooser = new LoggedNetworkChooser<>("Auto Method");
   /** 11/19：右搖桿左上的對齊方式（Elastic 賽前頁「對齊方式」）。 */
-  private enum AlignMethod { LUNA, VISION, LASER }
+  private enum AlignMethod { LUNA_TURN, LUNA, VISION, LASER }
   private final LoggedNetworkChooser<AlignMethod> alignChooser = new LoggedNetworkChooser<>("Align Method");
 
   /** 自動選項：哪個半場（記分板用來決定每格上限）+ 起點。half == null 代表還沒選（READY 燈不會亮）。 */
@@ -165,8 +165,9 @@ public class RobotContainer {
     autoPathChooser.add("不跑路徑（擺在目標欄前）", false);
     autoColumnChooser.addDefault("中欄", TargetColumn.MID);
     autoColumnChooser.add("己方欄（起點那一側）", TargetColumn.OWN_SIDE);
-    alignChooser.addDefault("砲台Luna找洞（沿牆前後找）", AlignMethod.LUNA);
-    alignChooser.add("視覺 VisionAlign（最近一欄）", AlignMethod.VISION);
+    alignChooser.addDefault("砲台Luna找洞（原地轉）", AlignMethod.LUNA_TURN);
+    alignChooser.add("砲台Luna找洞（沿牆前後找）", AlignMethod.LUNA);
+    alignChooser.add("視覺（最近一欄，原地轉）", AlignMethod.VISION);
     alignChooser.add("LaserAlign（擺正牆面）", AlignMethod.LASER);
     autoMethodChooser.addDefault("砲台Luna找洞（不用視覺）", AutoMethod.LUNA);
     autoMethodChooser.add("視覺（加分洞＋VisionAlign）", AutoMethod.VISION);
@@ -183,14 +184,16 @@ public class RobotContainer {
         () -> holdDrive() ? 0 : controller.getLeftY(),
         () -> holdDrive() ? 0 : -controller.getLeftX()));
 
-    // 右開關關著：Auto／RealManual 模式一律正轉；Manual、Assist 和 kDisable（未選模式、左開關剛關掉）都停。
+    // 右開關關著：RealManual／Feed 模式一律正轉；Manual、Assist 和 kDisable（未選模式、左開關剛關掉）都停。
     // 11/19 修 BUG：左開關關掉 → 模式變 kDisable，但 MockDS 停掉後機器人還會 enable 一小段時間，
     // 舊條件（只排除 Manual）會讓 Storage 全部轉起來。自動流程是在 kDisable 模式下跑的，所以跑自動時照轉。
     stroage.setDefaultCommand(new Normal(stroage, this::storageRunsByDefault));
     // 11/19：右開關打開（射擊模式）→ Storage 和 L298N Trigger 分開控制：
     // 偵測到射出（擊發 SparkMax 轉速掉到門檻以下）→ Trigger＋Storage 一起轉 kShotFeedTriggerSec（2 s）
     // → Storage 停、Trigger 繼續轉 kShotFeedStorageSec（0.7 s）→ 停
-    controller.rightSwitch().and(isFeed().negate()).whileTrue(new ShootFeed(stroage, turret::isTriggerStopped));
+    // 11/20：Assist 射擊中左搖桿往前推（Y < 0）→ L298N Trigger 手動正轉
+    controller.rightSwitch().and(isFeed().negate()).whileTrue(new ShootFeed(stroage, turret::isTriggerStopped,
+        () -> assistShooting() && controller.getLeftY() < -kManualTriggerThreshold));
 
     configureBindings();
   }
@@ -205,7 +208,8 @@ public class RobotContainer {
 
     // 自動流程：撥一下就啟動（onTrue）。開始時先把陀螺儀歸零（11/19），再用起點角度設定牆面基準。規則規定啟動後不能再碰遙控器，所以不能用 whileTrue（搖桿放開就會取消）。
     // 左開關關掉（MockDS 停止 → disable）時一併取消。
-    controller.leftSwitch().and(lefttop()).and(isDisable())
+    // 11/20：觸發改成右搖桿右上（原本左上；送球模式改到左上）
+    controller.leftSwitch().and(righttop()).and(isDisable())
       .onTrue(Commands.defer(
         () -> Commands.runOnce(scoreboard::reset).andThen(Commands.runOnce(drive::resetGyro)).andThen(Commands.runOnce(this::seedWallHeading)).andThen(buildAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true)
             .beforeStarting(() -> autoRunning = true).finallyDo(() -> autoRunning = false),
@@ -225,44 +229,20 @@ public class RobotContainer {
         Logger.recordOutput("Mode", "Assist");
       }).ignoringDisable(true)
     );
-    // 11/19：右搖桿右上 → 送球模式（Storage＋L298N Trigger 不停正轉；左開關關掉就停）
-    controller.leftSwitch().and(righttop()).and(isDisable())
+    // 11/20：右搖桿左上 → 送球模式（Storage＋L298N Trigger 不停正轉；左開關關掉就停）。原本右上，右上改給自動流程。
+    controller.leftSwitch().and(lefttop()).and(isDisable())
       .onTrue(Commands.runOnce(() -> {
         Constants.kRobotMode = RobotMode.kFeed;
         Logger.recordOutput("Mode", "Feed");
       }).ignoringDisable(true)
     );
-    controller.leftSwitch().and(middown()).and(isDisable())
-      .onTrue(Commands.runOnce(() -> {
-        Constants.kRobotMode = RobotMode.kAuto;
-        Logger.recordOutput("Mode", "Auto");
-      }).ignoringDisable(true)
-    );
-    
-    // isDisable 時 lefttop 是啟動自動流程用的，不能同時觸發 LaserAlign（兩個都要 drive，會互相打斷）
+    // 11/20：kAuto 模式（右搖桿正下）已拿掉
+
+    // isDisable 時 lefttop 是選送球模式用的，不觸發對齊
     // 11/19：右搖桿左上 = 對齊（Elastic「對齊方式」選：砲台Luna找洞／VisionAlign／LaserAlign）。
-    // 只要求底盤，所以 Assist／Auto 模式射擊中按也不會中斷射擊。
+    // 只要求底盤，所以 Assist 模式射擊中按也不會中斷射擊。
     isManual().negate().and(isRealManual().negate()).and(isDisable().negate()).and(isFeed().negate()).and(lefttop())
-      .onTrue(Commands.defer(this::buildAlign, java.util.Set.of(drive)));
-
-    // 11/19：Auto 模式選列和 Assist 一樣：左下 = 低、右下 = 中、右上 = 高；正下 = 低中高各 2 發（搖桿要按住到射完）
-    controller.rightSwitch().and(isAuto()).and(leftdown())
-      .whileTrue(new ColumnShot(turret, FieldConstants.kLowTargetHeight, 1));
-
-    controller.rightSwitch().and(isAuto()).and(rightdown())
-      .whileTrue(new ColumnShot(turret, FieldConstants.kMidTargetHeight, 1));
-
-    controller.rightSwitch().and(isAuto()).and(righttop())
-      .whileTrue(new ColumnShot(turret, FieldConstants.kHighTargetHeight, 1));
-
-    controller.rightSwitch().and(isAuto()).and(middown())
-      .whileTrue(
-        Commands.sequence(
-          new ColumnShot(turret, FieldConstants.kLowTargetHeight, 2),
-          new ColumnShot(turret, FieldConstants.kMidTargetHeight, 2),
-          new ColumnShot(turret, FieldConstants.kHighTargetHeight, 2)
-        )
-      );
+      .onTrue(Commands.defer(this::buildAlign, java.util.Set.of(drive)).until(this::leftStickOverride));
 
     controller.rightSwitch().and(isAssist())
       .whileTrue(
@@ -301,6 +281,23 @@ public class RobotContainer {
     RangeSensors.seedWallHeading(startYawToWallDeg.get());
   }
 
+  /** 11/20：Assist 射擊中左搖桿 Y 推過這個值（往前，Y 為負）→ L298N Trigger 手動正轉。 */
+  private static final double kManualTriggerThreshold = 0.3;
+
+  /**
+   * 11/20：搖桿對齊時左搖桿有輸入 → 中斷對齊。
+   * Assist 射擊中左搖桿 X 是擊發、往前推（Y < 0）是手動 Trigger，都不算；只有往後拉會中斷。
+   */
+  private static final double kAlignOverrideThreshold = 0.15;
+
+  private boolean leftStickOverride() {
+    boolean y = assistShooting()
+        ? controller.getLeftY() > kAlignOverrideThreshold
+        : Math.abs(controller.getLeftY()) > kAlignOverrideThreshold;
+    boolean x = !assistShooting() && Math.abs(controller.getLeftX()) > kAlignOverrideThreshold;
+    return x || y;
+  }
+
   private boolean assistShooting() {
     return Constants.kRobotMode == RobotMode.kAssist && controller.getHID().getRightSwitch();
   }
@@ -312,7 +309,7 @@ public class RobotContainer {
 
   private boolean storageRunsByDefault() {
     return switch (Constants.kRobotMode) {
-      case kAuto, kRealManual, kFeed -> true;
+      case kRealManual, kFeed -> true;
       case kManual, kAssist -> false; // 11/19：Assist 和 Manual 一樣，右開關關著就停
       case kDisable -> autoRunning || org.wpilib.driverstation.RobotState.isAutonomous();
     };
@@ -336,10 +333,6 @@ public class RobotContainer {
 
   public Trigger isAssist() {
     return new Trigger(() -> Constants.kRobotMode == RobotMode.kAssist);
-  }
-
-  public Trigger isAuto() {
-    return new Trigger(() -> Constants.kRobotMode == RobotMode.kAuto);
   }
 
   public Trigger midmid() {
@@ -371,11 +364,12 @@ public class RobotContainer {
   }
 
   private Command buildAlign() {
-    AlignMethod m = alignChooser.get() == null ? AlignMethod.LUNA : alignChooser.get();
+    AlignMethod m = alignChooser.get() == null ? AlignMethod.LUNA_TURN : alignChooser.get();
     Logger.recordOutput("Align/Method", m.name());
     return switch (m) {
+      case LUNA_TURN -> DriveCommands.lunaTurnAlign(drive, turretLidar);
       case LUNA -> DriveCommands.lunaCenterAlign(drive, turretLidar);
-      case VISION -> new VisionAlign(drive, vision, VisionAlign.Target.NEAREST);
+      case VISION -> new frc.robot.commands.drive.VisionTurnAlign(drive, vision, VisionAlign.Target.NEAREST);
       case LASER -> new LaserAlign(drive);
     };
   }

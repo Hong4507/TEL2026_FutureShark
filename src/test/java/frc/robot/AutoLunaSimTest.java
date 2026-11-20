@@ -224,12 +224,25 @@ class AutoLunaSimTest {
     assertEquals(90, r.endHeadingDeg, 2);
   }
 
-  /** 砲台 Luna 斷線 → 只走 ApproachMeters，原地射 9 發（等於人工擺位）。 */
+  /** 砲台 Luna 斷線 → 不動，原地射 9 發（等於人工擺位）。 */
   @Test
   void lidarUnavailableShootsInPlace() {
     Run r = run(StartSide.RIGHT, 0.80, new TurretLidarIO() {});
     assertEquals(9, r.shots.size());
-    assertEquals(0.80 + 0.3, r.shots.get(0), 0.1);
+    assertEquals(0.80, r.shots.get(0), 0.05);
+  }
+
+  /** 11/20：Auto 改原地轉 → 整段都不沿牆走（不會撞場地 Frame）。洞在反方向時，掃完一邊轉回來掃另一邊。 */
+  @ParameterizedTest(name = "{0} 從 y={1} → 欄 y={2}，不沿牆走")
+  @CsvSource({
+    "RIGHT, 0.80, 1.1",
+    "RIGHT, 1.50, 1.1",   // 往車頭那邊（逆時針）掃不到近的，掃到中欄或回頭找到右欄都可以，但不能走
+    "LEFT,  3.20, 2.9",
+  })
+  void doesNotDriveAlongWall(StartSide side, double startY, double expectedY) {
+    Run r = run(side, startY, new TurretLidarIOSim(() -> drive.getPose()));
+    assertEquals(startY, drive.getPose().getY(), 0.05, "不應該沿牆走");
+    assertEquals(9, r.shots.size());
   }
 
   /** 11/19：起點車頭朝九宮格（StartYawToWallDeg = −90）→ 先逆時針轉 90° 讓右側朝九宮格，再找洞射 9 發。 */
@@ -241,7 +254,7 @@ class AutoLunaSimTest {
   void frontToGridTurnsFirst(StartSide side, double startY, double expectedY) {
     Run r = run(side, startY, new TurretLidarIOSim(() -> drive.getPose()), 0, -90);
     assertAllAt(r.shots, 9, expectedY);
-    assertEquals(90, r.endHeadingDeg, 2, "轉完右側朝九宮格");
+    assertEquals(90, r.endHeadingDeg, 26, "轉完右側朝九宮格（原地轉找洞最多 25°）");
   }
 
   /** 11/19：洞後面放實心黑箱子（離板面 boxBehind m）→ 穿過洞讀到的是箱子，不是 0。靠「板子基準」照樣找得到。 */
@@ -272,6 +285,6 @@ class AutoLunaSimTest {
     Run r = run(StartSide.RIGHT, 0.40, new TurretLidarIOSim(() -> drive.getPose()), 0, -90, startHorizontal);
     assertEquals(3.25, endTargetDistance, 0.05, "射擊距離");
     assertAllAt(r.shots, 9, kRightTargetY);
-    assertEquals(90, r.endHeadingDeg, 2);
+    assertEquals(90, r.endHeadingDeg, 26);
   }
 }

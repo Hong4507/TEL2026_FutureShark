@@ -120,16 +120,20 @@ public class TurretLidar extends SubsystemBase {
     double yaw = yawErrorRad.getAsDouble();
     if (!Double.isFinite(yaw)) yaw = 0;
     horizontal = wall.isPresent() ? (wall.getAsDouble() + kInboardMeters) / Math.cos(yaw) : Double.NaN;
-    double expected = expectedBoardDistance(horizontal);
     double beamHeight = beamHeightAtBoard(horizontal);
+    // 11/20：原地轉找洞時光束斜打，讀值 ≈ 正對距離 / cos(yaw)，轉 20° 會變遠 6%（3 m 外約 0.2 m），
+    // 板子基準跟得慢 → 會被誤判成「比基準遠＝穿過洞」。所以判斷前先把讀值換回「正對」的距離。
+    double cosYaw = Math.cos(yaw);
+    double squareReading = inputs.distanceMeters * cosYaw;
+    double expected = expectedBoardDistance(horizontal) * cosYaw;
     double now = org.wpilib.system.Timer.getTimestamp();
     double base = baseline.get(now);
     rawBeam = enabled.get()
-        ? classify(inputs.connected, inputs.distanceMeters, inputs.strength, expected, base, baselineHoleMargin.get())
+        ? classify(inputs.connected, squareReading, inputs.strength, expected, base, baselineHoleMargin.get())
         : Beam.DISABLED;
     // 只拿「看起來是板子」的讀值更新基準（被擋住、穿過洞都不算）
     if (rawBeam == Beam.BOARD) {
-      baseline.update(now, inputs.distanceMeters);
+      baseline.update(now, squareReading);
       farSince = Double.NaN;
     } else if (rawBeam == Beam.THROUGH_HOLE && inputs.distanceMeters >= RangeSensorConstants.kMinValidRangeMeters) {
       // 穿過洞、讀到後面的箱子：基準保持有效（過一個洞約 2–3 s）；
@@ -137,7 +141,7 @@ public class TurretLidar extends SubsystemBase {
       baseline.touch(now);
       if (Double.isNaN(farSince)) farSince = now;
       if (now - farSince > kMaxFarSec) {
-        baseline.reset(now, inputs.distanceMeters);
+        baseline.reset(now, squareReading);
         farSince = Double.NaN;
       }
     }
@@ -150,7 +154,8 @@ public class TurretLidar extends SubsystemBase {
     Logger.recordOutput("TurretLidar/Valid", isValid());
     Logger.recordOutput("TurretLidar/ExpectedBoardMeters", expected);
     Logger.recordOutput("TurretLidar/BaselineMeters", base);
-    Logger.recordOutput("TurretLidar/MinusBaselineMeters", inputs.distanceMeters - base);
+    Logger.recordOutput("TurretLidar/MinusBaselineMeters", squareReading - base);
+    Logger.recordOutput("TurretLidar/YawDeg", Math.toDegrees(yaw));
     Logger.recordOutput("TurretLidar/BeamHeightAtBoardMeters", beamHeight);
     Logger.recordOutput("TurretLidar/BeamRow", rowAtHeight(beamHeight));
     Logger.recordOutput("TurretLidar/Beam", beam.name());
@@ -307,6 +312,12 @@ public class TurretLidar extends SubsystemBase {
 
   public boolean isConnected() {
     return inputs.connected;
+  }
+
+  /** 鏡頭到板面的「正對」水平距離（不含 yaw 造成的斜距）；沒有牆距 = NaN。原地轉找洞換算角度用。 */
+  public double getSquareHorizontalMeters() {
+    OptionalDouble wall = wallDistanceMeters.get();
+    return wall.isPresent() ? wall.getAsDouble() + kInboardMeters : Double.NaN;
   }
 
   /** 光束穿過洞（已 debounce）。只給顯示用。 */

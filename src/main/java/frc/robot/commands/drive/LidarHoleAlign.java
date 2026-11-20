@@ -37,6 +37,9 @@ public class LidarHoleAlign extends Command {
   private static final double kMaxHoleWidthMeters = 0.5;
   /** 洞寬小於這個值 → 當成雜訊，繼續找。 */
   private static final double kMinHoleWidthMeters = 0.05;
+  /** 一開始就在洞裡時最多倒退多遠（洞寬 0.4 m，一定退得出去）。 */
+  private static final double kMaxBackupMeters = 0.5;
+  private double backupStart;
   private static final double kCenterKp = 2.0;
   private static final double kCenterMaxSpeed = 0.2;
   private static final double kCenterMinSpeed = 0.04;
@@ -118,7 +121,12 @@ public class LidarHoleAlign extends Command {
       case BACKUP -> {
         // 開始找的時候已經在洞裡：不知道進洞邊緣在哪，先倒退到洞外，再重新往前量
         speed = -kSearchSpeed.get();
-        if (!hole) state = State.SEARCH;
+        if (!hole) {
+          state = State.SEARCH;
+        } else if (backupStart - s > kMaxBackupMeters) {
+          // 11/20：倒退太遠還一直「在洞裡」→ Luna 讀值不對（例如打在黑板上讀 0），不要一直倒退撞到場地 Frame
+          finish(Result.NOT_FOUND);
+        }
       }
       case SEARCH -> {
         speed = kSearchSpeed.get();
@@ -127,6 +135,7 @@ public class LidarHoleAlign extends Command {
         if (result == Result.UNAVAILABLE) {
           state = State.DONE;
         } else if (hole && first) {
+          backupStart = s;
           state = State.BACKUP;
         } else if (hole) {
           entry = s;

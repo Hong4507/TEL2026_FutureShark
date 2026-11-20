@@ -168,6 +168,12 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
     return new Solution(kFallbackDistanceMeters, Double.NaN, Double.NaN, false);
   }
 
+  /** GRID_WALL 時 frame 到牆距離比 {@link RangeSensorConstants#kMinGridWallRangeMeters} − margin 還近（讀值 0 等無效值交給 isValid）。 */
+  static boolean isTooCloseForGrid(double frameDistanceMeters) {
+    return kRangeReference == RangeReference.GRID_WALL
+        && frameDistanceMeters < kMinGridWallRangeMeters - kMinGridWallMarginMeters;
+  }
+
   private Reading read() {
     double now = Timer.getTimestamp();
     if (cached != null && now - cachedTime < kCacheSeconds) {
@@ -175,8 +181,14 @@ public class DualTFLunaRangeSensor implements TargetRangeSensor {
     }
     left.update();
     right.update();
-    boolean lValid = left.isValid();
-    boolean rValid = right.isValid();
+    // 11/20：GRID_WALL 時換算成「右 frame 到牆」比門檻近 → 不可能（機器人進不去九宮格前 2.5 m）→ 打到對手／球／人，當無效。
+    // 用 frame 距離不用原始讀值：左 Luna 比右 frame 更靠牆 8 cm，貼著 2.5 m 線時原始讀值只有 2.42 m。
+    boolean lTooClose = isTooCloseForGrid(left.distanceMeters - kLeftLunaInboardMeters - kLunaTrimMeters);
+    boolean rTooClose = isTooCloseForGrid(right.distanceMeters - kRightLunaInboardMeters);
+    boolean lValid = left.isValid() && !lTooClose;
+    boolean rValid = right.isValid() && !rTooClose;
+    Logger.recordOutput("RangeSensor/TFLuna/LeftTooClose", lTooClose);
+    Logger.recordOutput("RangeSensor/TFLuna/RightTooClose", rTooClose);
     double l = leftFilter.calculate(now, left.distanceMeters, lValid);
     double r = rightFilter.calculate(now, right.distanceMeters, rValid);
     Logger.recordOutput("RangeSensor/TFLuna/LeftValid", lValid);

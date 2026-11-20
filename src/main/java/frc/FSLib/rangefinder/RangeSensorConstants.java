@@ -75,6 +75,14 @@ public final class RangeSensorConstants {
   /** TF-Luna 有效量測範圍（公尺）。 */
   public static final double kMinValidRangeMeters = 0.2;
   public static final double kMaxValidRangeMeters = 8.0;
+  /**
+   * 11/20：GRID_WALL 時左右 Luna 換算成「右 frame 到牆」的距離低於這個值就無效。九宮格前 2.5 m 是矮牆圍起來的區域
+   * （{@link #kWallToTargetMeters}），機器人進不去，讀到更近 = 光束打到對手、球或人。
+   * 只看左右兩顆車身 Luna（砲台 Luna 不受影響）。
+   */
+  public static final double kMinGridWallRangeMeters = 2.5;
+  /** 貼著矮牆時 Luna 誤差（幾公分）不要被誤判成太近，門檻再往內放這麼多。 */
+  public static final double kMinGridWallMarginMeters = 0.1;
 
   /** 訊號強度低於此值或等於 65535（過曝）時視為無效。 */
   public static final double kMinStrength = 100;

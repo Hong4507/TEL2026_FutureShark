@@ -20,12 +20,16 @@ import frc.robot.subsystems.storage.Stroage;
  * </ol>
  * 送料途中又射一發 → 從第 2 步重新開始。右開關關掉 → 指令結束，全部停止。
  *
+ * <p>11/20：{@code manualTrigger} 為 true 時（Assist 射擊中左搖桿往前推）L298N Trigger 一律正轉，Storage 照上面的流程。
+ *
  * @see frc.robot.subsystems.turret.Turret#ballFired()
  */
 public class ShootFeed extends Command {
   private final Stroage stroage;
   /** 擊發馬達「停著」（轉速低於門檻）。false → true 的那一刻 = 剛射出。 */
   private final BooleanSupplier triggerStopped;
+  /** 手動讓 L298N Trigger 正轉。 */
+  private final BooleanSupplier manualTrigger;
   private final Timer timer = new Timer();
   private boolean lastStopped;
   private boolean feeding;
@@ -33,8 +37,13 @@ public class ShootFeed extends Command {
   private int detected;
 
   public ShootFeed(Stroage stroage, BooleanSupplier triggerStopped) {
+    this(stroage, triggerStopped, () -> false);
+  }
+
+  public ShootFeed(Stroage stroage, BooleanSupplier triggerStopped, BooleanSupplier manualTrigger) {
     this.stroage = stroage;
     this.triggerStopped = triggerStopped;
+    this.manualTrigger = manualTrigger;
     addRequirements(stroage);
   }
 
@@ -59,6 +68,8 @@ public class ShootFeed extends Command {
     Logger.recordOutput("Storage/ShotsDetected", detected);
     lastStopped = stopped;
 
+    boolean manual = manualTrigger.getAsBoolean();
+    Logger.recordOutput("Storage/ManualTrigger", manual);
     String state;
     double t = timer.get();
     if (feeding && t < kShotFeedTriggerSec) {
@@ -75,8 +86,14 @@ public class ShootFeed extends Command {
       state = "TriggerOnly";
     } else {
       feeding = false;
-      stop();
-      state = "Waiting";
+      stroage.disableStorage();
+      if (manual) {
+        stroage.setTriggerDirection(true);
+        stroage.setTriggerSpeed(1);
+      } else {
+        stroage.disableTrigger();
+      }
+      state = manual ? "ManualTrigger" : "Waiting";
     }
     Logger.recordOutput("Storage/ShootFeedState", state);
   }

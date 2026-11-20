@@ -49,10 +49,10 @@ public final class VisionConstants {
 
   /**
    * 射球點（DownShooter／砲台 Luna 所在的沿牆位置）在攝影機前方（機器人前進方向＝車頭方向，沿牆）多少公尺。
-   * 對準時目標要出現在射球點正前方。11/15 實測：Limelight 在砲台 Luna 右方（面向九宮格的右＝車尾）242.41 mm。
+   * 對準時目標要出現在射球點正前方。11/20 重新實測：Limelight 比砲台中心往車尾 254 mm（11/15 量的是相對砲台 Luna 242.41 mm）。
    * VisionAlign 對準後射球偏哪邊再微調。
    */
-  public static final double kShooterForwardOfCameraMeters = 0.24241;
+  public static final double kShooterForwardOfCameraMeters = 0.254;
 
   /**
    * 攝影機（Limelight）仰角（度，往上為正）。11/15 實測 30°。
@@ -80,9 +80,10 @@ public final class VisionConstants {
 
   /**
    * 攝影機鏡頭比 DownShooter 輪心離九宮格遠多少公尺（垂直牆面方向）。鏡頭到板面距離 = TargetDistance + 這個值，
-   * 用來把 tx 換算成沿牆公尺數。11/15 實測：Limelight 在砲台 Luna 後方 320.45 mm → 深度 331.18 mm − 169.53 mm。
+   * 用來把 tx 換算成沿牆公尺數。11/20 重新實測：鏡頭到九宮格那面 Frame 331.08 mm（11/15 是 331.18）
+   * → 331.08 mm − 輪心深度 169.53 mm（RangeSensorConstants.kShooterInboardMeters）。
    */
-  public static final double kCameraBehindShooterMeters = 0.16165;
+  public static final double kCameraBehindShooterMeters = 0.33108 - 0.16953;
 
   // ---------- 九宮格幾何（規則 p.13）----------
   /** 相鄰兩欄中心距：洞徑 40 cm + 間距 50 cm。 */

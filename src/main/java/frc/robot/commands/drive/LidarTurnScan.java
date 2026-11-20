@@ -21,7 +21,12 @@ import frc.robot.subsystems.turretlidar.TurretLidar;
 public class LidarTurnScan extends Command {
   private enum State { SCAN, IN_HOLE, CENTER, RETURN, DONE }
 
-  private static final LoggedNetworkNumber kMaxDeg = new LoggedNetworkNumber("/Tuning/LunaAuto/ScanMaxDeg", 40);
+  /**
+   * 11/20：40 → 25。轉越多光束斜打的水平路徑越長（÷cos），打在板上的位置越高：
+   * 中列（3.1 m）轉 25° 水平多 0.32 m ≈ 該列有效範圍 ±0.35 m 的邊緣，再轉下去會打到別列。
+   * 3.1 m 外轉 25° 光點沿牆移 1.4 m，足夠找到起點兩側最近的洞。
+   */
+  private static final LoggedNetworkNumber kMaxDeg = new LoggedNetworkNumber("/Tuning/LunaAuto/ScanMaxDeg", 25);
   /** 輪子線速度（m/s），0.04 ≈ 10°/s，光點在 3 m 外約 0.5 m/s。 */
   private static final LoggedNetworkNumber kScanWheelSpeed = new LoggedNetworkNumber("/Tuning/LunaAuto/ScanWheelMps", 0.04);
 
@@ -36,6 +41,7 @@ public class LidarTurnScan extends Command {
   private final Drive drive;
   private final TurretLidar lidar;
   private final double dir;
+  private final java.util.function.DoubleSupplier maxDeg;
 
   private State state;
   private double startHeading;
@@ -45,9 +51,20 @@ public class LidarTurnScan extends Command {
   private final Timer timer = new Timer();
 
   public LidarTurnScan(Drive drive, TurretLidar lidar, double dir) {
+    this(drive, lidar, dir, kMaxDeg::get);
+  }
+
+  /** 手動對齊用：自己給最大掃描角度（度），不用自動流程的 NT 參數。 */
+  public LidarTurnScan(Drive drive, TurretLidar lidar, double dir, double maxDeg) {
+    this(drive, lidar, dir, () -> maxDeg);
+  }
+
+  /** maxDeg 每個週期重新讀（例如依牆距換算）。 */
+  public LidarTurnScan(Drive drive, TurretLidar lidar, double dir, java.util.function.DoubleSupplier maxDeg) {
     this.drive = drive;
     this.lidar = lidar;
     this.dir = Math.signum(dir) == 0 ? 1 : Math.signum(dir);
+    this.maxDeg = maxDeg;
     addRequirements(drive);
   }
 
@@ -81,7 +98,7 @@ public class LidarTurnScan extends Command {
         if (hole) {
           entry = a;
           state = State.IN_HOLE;
-        } else if (a > Math.toRadians(kMaxDeg.get())) {
+        } else if (a > Math.toRadians(maxDeg.getAsDouble())) {
           target = 0;
           startCenter(State.RETURN);
         }

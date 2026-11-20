@@ -14,10 +14,10 @@ import com.pathplanner.lib.commands.PathPlannerAuto;
 import frc.FSLib.rangefinder.RangeSensors;
 import frc.robot.commands.drive.DriveDistance;
 import frc.robot.commands.drive.LaserAlign;
-import frc.robot.commands.drive.LidarHoleAlign;
 import frc.robot.commands.drive.LidarTurnScan;
 import frc.robot.commands.drive.TurnByAngle;
 import frc.robot.commands.drive.VisionAlign;
+import frc.robot.commands.drive.VisionTurnAlign;
 import frc.robot.commands.turret.ColumnShot;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.turret.Turret;
@@ -46,6 +46,8 @@ public final class AutoRoutines {
    * 11/19：起點離九宮格 5.8–7.0 m（TargetDistance）。先朝九宮格盲走這麼遠（5.8 − 3.25），剩 3.25–4.45 m 再轉過去用 Luna 量。
    */
   private static final LoggedNetworkNumber kBlindApproach = new LoggedNetworkNumber("/Tuning/Auto/BlindApproachMeters", 2.55);
+  /** 11/20：原地轉找到洞後先停穩再射（剛停下來車身還會轉一點，第一發會偏）。 */
+  private static final double kScanSettleSec = 0.3;
   /** 量不到距離時再往前走多少（公尺）。 */
   private static final double kRetryStepMeters = 0.6;
   private static final double kShootDistanceToleranceMeters = 0.05;
@@ -251,40 +253,42 @@ public final class AutoRoutines {
   /**
    * 不用視覺的自動流程（11/15 隊員指定）：
    * <ol>
-   *   <li>飛輪開始轉＋往前走 {@code /Tuning/LunaAuto/ApproachMeters}，再慢慢走直到砲台 Luna 穿過洞、停在洞中間（{@link LidarHoleAlign}）。</li>
-   *   <li>找到 → 低／中／高各射 {@link Half#ballsPerHole()} 發（上半場預設 3）。</li>
-   *   <li>走不動（被對手擋住）或走完沒找到 → 原地轉找洞（{@link LidarTurnScan}），找到才射，距離用 正對距離 / cos(轉角)。</li>
-   *   <li>砲台 Luna 停用或斷線 → 只走 ApproachMeters，原地直接射（等於人工擺位）。</li>
+   *   <li>11/20：<b>不沿牆走</b>（會撞到場地 Frame）。飛輪開始轉＋原地轉找洞（{@link LidarTurnScan}）：
+   *       先往起點決定的方向掃（{@link Plan#lunaDirection()}，往中欄那側），沒找到轉回來再掃另一側。</li>
+   *   <li>找到 → 低／中／高各射 {@link Half#ballsPerHole()} 發（上半場預設 3），距離用 正對距離 / cos(轉角)。</li>
+   *   <li>兩邊都沒找到 → 不射。</li>
+   *   <li>砲台 Luna 停用或斷線 → 原地直接射（等於人工擺位）。</li>
    * </ol>
-   * 方向由起點決定（{@link Plan#lunaDirection()}）。
    */
   public static Command lunaColumn(Drive drive, Turret turret, TurretLidar turretLidar, Plan plan) {
     int perHole = plan.half().ballsPerHole();
     double dir = plan.lunaDirection();
     Logger.recordOutput("Auto/BallsPerHole", perHole);
     Logger.recordOutput("Auto/Plan", plan.describe());
-    LidarHoleAlign align = new LidarHoleAlign(drive, turretLidar, dir);
     LidarTurnScan scan = new LidarTurnScan(drive, turretLidar, dir);
+    LidarTurnScan scanBack = new LidarTurnScan(drive, turretLidar, -dir);
     double[] squareDistance = {Double.NaN};
-    DoubleSupplier slanted = () -> squareDistance[0] / Math.max(Math.cos(scan.turnedRad()), 0.5);
+    double[] squareHeading = {0};
+    DoubleSupplier slanted = () -> squareDistance[0]
+        / Math.max(Math.cos(drive.getPose().getRotation().getRadians() - squareHeading[0]), 0.5);
     return Commands.sequence(
-      log("Luna-Approach"),
-      Commands.parallel(Commands.runOnce(() -> spinUp(turret)), align),
+      Commands.runOnce(() -> spinUp(turret)),
       Commands.either(
-        Commands.sequence(log("Luna-Shoot"), columnShots(turret, perHole, null)),
-        Commands.either(
-          Commands.sequence(log("Luna-Unavailable-Shoot"), columnShots(turret, perHole, null)),
-          Commands.sequence(
-            log("Luna-TurnScan"),
-            Commands.runOnce(() -> squareDistance[0] = RangeSensors.get().getTargetDistance()),
-            scan,
-            Commands.either(
-              Commands.sequence(log("Luna-ScanShoot"), columnShots(turret, perHole, slanted)),
-              log("Luna-NoHole"),
-              scan::found)
-          ),
-          () -> align.result() == LidarHoleAlign.Result.UNAVAILABLE),
-        align::found),
+        Commands.sequence(log("Luna-Unavailable-Shoot"), columnShots(turret, perHole, null)),
+        Commands.sequence(
+          log("Luna-TurnScan"),
+          Commands.runOnce(() -> {
+            squareDistance[0] = RangeSensors.get().getTargetDistance();
+            squareHeading[0] = drive.getPose().getRotation().getRadians();
+          }),
+          scan,
+          Commands.either(Commands.none(), Commands.sequence(log("Luna-TurnScanBack"), scanBack), scan::found),
+          Commands.either(
+            Commands.sequence(log("Luna-ScanShoot"), Commands.waitSeconds(kScanSettleSec), columnShots(turret, perHole, slanted)),
+            log("Luna-NoHole"),
+            () -> scan.found() || scanBack.found())
+        ),
+        () -> !turretLidar.isUsable()),
       log("Done")
     ).finallyDo(() -> {
       turret.setVelocity(0);
@@ -312,7 +316,8 @@ public final class AutoRoutines {
    * <ol>
    *   <li>飛輪開始轉（§8.6，整段不停）＋（選了跑路徑時）PathPlanner 開到中欄。</li>
    *   <li>等最多 {@link #kLitWaitSeconds} 秒找亮燈加分洞 → 對準亮燈那欄、射加分洞；找不到就對 {@link Plan#fallbackColumn()}。</li>
-   *   <li>同一欄低／中／高，每發前重新 VisionAlign NEAREST，對準失敗重試 1 次（§8.8）。</li>
+   *   <li>同一欄低／中／高，每發前重新對準 NEAREST，對準失敗重試 1 次（§8.8）。</li>
+   *   <li>11/20：對準改成<b>原地轉</b>（{@link VisionTurnAlign}），不沿牆走；射擊距離用 正對距離 / cos(轉角)。</li>
    *   <li>結束或取消時停飛輪。</li>
    * </ol>
    */
@@ -328,31 +333,35 @@ public final class AutoRoutines {
       case MID -> VisionAlign.Target.MID;
       case RIGHT -> VisionAlign.Target.RIGHT;
     };
+    // 車身正對牆面時的朝向（路徑跑完後用車身 Luna 的牆面偏角算；沒有偏角就當作那時是正對的）；之後原地轉對準都相對這個角度
+    double[] square = {0};
+    DoubleSupplier squareHeading = () -> square[0];
     return Commands.sequence(
       log(plan.runPath() ? "Path" : "NoPath"),
       Commands.parallel(
         Commands.runOnce(() -> spinUp(turret)),
         plan.runPath() ? new PathPlannerAuto(plan.side().pathAuto) : Commands.none()
       ),
+      Commands.runOnce(() -> square[0] = VisionTurnAlign.squareHeadingNow(drive)),
       log("WaitLit"),
       Commands.waitUntil(() -> litVisible(vision)).withTimeout(kLitWaitSeconds),
       Commands.either(
         Commands.sequence(
           log("AlignLit"),
-          alignWithRetry(drive, vision, VisionAlign.Target.LIT),
+          alignWithRetry(drive, vision, VisionAlign.Target.LIT, squareHeading),
           log("Bonus"),
-          alignedShots(drive, vision, turret, kSpecialTargetHeight, bonusBalls)
+          alignedShots(drive, vision, turret, kSpecialTargetHeight, bonusBalls, squareHeading)
         ),
         Commands.sequence(
           log("NoLit-Align" + fallback.name()),
-          alignWithRetry(drive, vision, fallback)
+          alignWithRetry(drive, vision, fallback, squareHeading)
         ),
         () -> litVisible(vision)
       ),
       log("Column"),
-      alignedShots(drive, vision, turret, kLowTargetHeight, ballsPerHole),
-      alignedShots(drive, vision, turret, kMidTargetHeight, ballsPerHole),
-      alignedShots(drive, vision, turret, kHighTargetHeight, ballsPerHole),
+      alignedShots(drive, vision, turret, kLowTargetHeight, ballsPerHole, squareHeading),
+      alignedShots(drive, vision, turret, kMidTargetHeight, ballsPerHole, squareHeading),
+      alignedShots(drive, vision, turret, kHighTargetHeight, ballsPerHole, squareHeading),
       log("Done")
     ).finallyDo(() -> {
       turret.setVelocity(0);
@@ -366,15 +375,15 @@ public final class AutoRoutines {
     turret.setVelocity(v, v * 0.8);
   }
 
-  /** VisionAlign；失敗（逾時／找不到）就再試一次（§8.8）。 */
-  private static Command alignWithRetry(Drive drive, Vision vision, VisionAlign.Target target) {
-    VisionAlign first = new VisionAlign(drive, vision, target);
+  /** 原地轉視覺對準；失敗（逾時／找不到）就再試一次（§8.8）。 */
+  private static Command alignWithRetry(Drive drive, Vision vision, VisionAlign.Target target, DoubleSupplier squareHeading) {
+    VisionTurnAlign first = new VisionTurnAlign(drive, vision, target, squareHeading);
     return Commands.sequence(
       first,
       Commands.either(
         Commands.sequence(
           Commands.runOnce(() -> Logger.recordOutput("Auto/AlignRetry", target.name())),
-          new VisionAlign(drive, vision, target)
+          new VisionTurnAlign(drive, vision, target, squareHeading)
         ),
         Commands.none(),
         () -> !first.succeeded()
@@ -382,13 +391,16 @@ public final class AutoRoutines {
     );
   }
 
-  /** 每一發前先用視覺對準最近的一欄（已鎖定的那欄），再射一發。飛輪不停（§8.6）。 */
-  private static Command alignedShots(Drive drive, Vision vision, Turret turret, double height, int count) {
+  /** 每一發前先用視覺對準最近的一欄（原地轉），再射一發。飛輪不停（§8.6）。距離 = 正對距離 / cos(轉角)。 */
+  private static Command alignedShots(Drive drive, Vision vision, Turret turret, double height, int count,
+      DoubleSupplier squareHeading) {
+    DoubleSupplier slanted = () -> RangeSensors.get().getTargetDistance()
+        / Math.max(Math.cos(drive.getPose().getRotation().getRadians() - squareHeading.getAsDouble()), 0.5);
     Command[] shots = new Command[count];
     for (int i = 0; i < count; i++) {
       shots[i] = Commands.sequence(
-        alignWithRetry(drive, vision, VisionAlign.Target.NEAREST),
-        new ColumnShot(turret, height, 1, false)
+        alignWithRetry(drive, vision, VisionAlign.Target.NEAREST, squareHeading),
+        new ColumnShot(turret, height, 1, false, slanted)
       );
     }
     return Commands.sequence(shots);

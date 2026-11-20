@@ -161,6 +161,22 @@ public class FlySkyController {
   private boolean lastLeftSwitch2Value = false;
 
   /**
+   * 11/20：短暫斷線時開關維持最後收到的值（搖桿照樣歸零）。
+   * Assist 擊發時 Trigger＋Storage 一起轉、電壓掉 → 接收機／USB-TTL 斷線一下，
+   * 原本會被當成「左開關關掉」→ MockDS 停止、模式變回未選模式（機器人 disable）。
+   * 真的斷線超過這個時間才當成關掉。
+   */
+  public static final double kSwitchHoldSeconds = 0.5;
+  private double lastSwitchSeenTime = Double.NEGATIVE_INFINITY;
+  private boolean heldLeftSwitch = false;
+  private boolean heldRightSwitch = false;
+
+  // 診斷：斷線次數、最近一次斷線多久
+  private boolean wasConnected = false;
+  private double disconnectStart = 0;
+  private int dropoutCount = 0;
+
+  /**
    * @param leftXChannel 各參數為 iBus 通道 index（0 = CH1）
    */
   public FlySkyController(
@@ -239,6 +255,17 @@ public class FlySkyController {
 
   /** 把連線狀態與通道值記到 AdvantageKit Log（每個 loop 呼叫一次）。 */
   public void logTelemetry() {
+    boolean connected = isConnected();
+    double now = Timer.getTimestamp();
+    if (wasConnected && !connected) {
+      disconnectStart = now;
+      dropoutCount++;
+      Logger.recordOutput("FlySky/DropoutCount", dropoutCount);
+    } else if (!wasConnected && connected && dropoutCount > 0) {
+      Logger.recordOutput("FlySky/LastDropoutSec", now - disconnectStart);
+    }
+    wasConnected = connected;
+    Logger.recordOutput("FlySky/SwitchHeld", !connected && now - lastSwitchSeenTime < kSwitchHoldSeconds);
     Logger.recordOutput("FlySky/Source", getSource().name());
     Logger.recordOutput("FlySky/ChannelsUs", getChannelsMicroseconds());
     if (serialReader != null) {
@@ -264,8 +291,25 @@ public class FlySkyController {
    * @return The state of the switch.
    */
   public boolean getLeftSwitch() {
-    lastLeftSwitch1Value = getChannel(leftSwitchChannel) > 0;
+    lastLeftSwitch1Value = readSwitch(leftSwitchChannel, true);
     return lastLeftSwitch1Value;
+  }
+
+  /** 讀開關；斷線不到 {@link #kSwitchHoldSeconds} 時回傳最後收到的值。 */
+  private boolean readSwitch(int channel, boolean left) {
+    double[] channels = getChannelsMicroseconds();
+    double now = Timer.getTimestamp();
+    if (channel >= 0 && channel < channels.length) {
+      boolean value = channels[channel] > 1500;
+      lastSwitchSeenTime = now;
+      if (left) heldLeftSwitch = value;
+      else heldRightSwitch = value;
+      return value;
+    }
+    if (now - lastSwitchSeenTime < kSwitchHoldSeconds) {
+      return left ? heldLeftSwitch : heldRightSwitch;
+    }
+    return false;
   }
 
   /**
@@ -296,7 +340,7 @@ public class FlySkyController {
    * @return The state of the switch.
    */
   public boolean getRightSwitch() {
-    lastLeftSwitch2Value = getChannel(rightSwitchChannel) > 0;
+    lastLeftSwitch2Value = readSwitch(rightSwitchChannel, false);
     return lastLeftSwitch2Value;
   }
 

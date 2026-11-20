@@ -85,6 +85,12 @@ public class Vision extends SubsystemBase {
     return inputs.connected ? inputs.fps : 0.0;
   }
 
+  /** 這張畫面大約是多久之前拍的（秒）：Jetson 處理時間 + 傳到 robot 的時間（不含曝光、Limelight 串流）。 */
+  public double getFrameLatencySeconds() {
+    double age = Double.isFinite(inputs.ageMs) ? inputs.ageMs : 0;
+    return Math.max(0, inputs.latencyMs + age) / 1000.0;
+  }
+
   /** 這個週期是否有新的一張畫面結果。控制迴圈只在有新畫面時更新量測值。 */
   public boolean hasNewFrame() {
     return inputs.newFrame;

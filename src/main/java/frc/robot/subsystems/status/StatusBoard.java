@@ -113,7 +113,6 @@ public class StatusBoard extends SubsystemBase {
       case kRealManual -> "真手動";
       case kFeed -> "送球（Storage 一直轉）";
       case kAssist -> "輔助";
-      case kAuto -> "自動";
       case kDisable -> "未選模式";
     };
     boolean enabled = RobotState.isEnabled();
