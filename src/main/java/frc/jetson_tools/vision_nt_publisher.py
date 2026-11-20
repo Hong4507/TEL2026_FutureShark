@@ -25,6 +25,13 @@ NT 表 Vision（格式必須和 robot/subsystems/vision/VisionConstants.java 一
   保護     剩餘空間 < --record-min-free-gb（5 GB）自動停止；另一個執行緒寫檔，佇列滿就丟幀，不拖慢偵測
 
 即時畫面（畫好框）：瀏覽器開 http://<Jetson IP>:1181/ ，--stream-port 0 關閉。
+
+自動錄影（11/20）：
+  預設  機器人 enable 時自動錄（讀 NT /AdvantageKit/RealOutputs/Status/Enabled），disable 後再錄 3 秒
+        → ~/videos/YYYYMMDD/HHMMSS_partNN.avi（MJPG，每 60 秒切一檔；斷電也只損失最後一段）
+  選項  --video always（一直錄）／off（不錄）、--video-overlay（錄畫好框的畫面）
+  輸出  /Vision/VideoRecording、/Vision/VideoStatus、/Vision/VideoFile
+  保護  剩餘空間 < --record-min-free-gb（5 GB）自動停止
 """
 import argparse
 import math
@@ -311,6 +318,131 @@ class Recorder:
         return f"未錄影（{self.count} 張）"
 
 
+class VideoRecorder:
+    """自動錄影（11/20）：機器人 enable 時把攝影機畫面錄成影片，disable 後再錄 tail_s 秒就停。
+
+    - 格式 MJPG .avi：比賽結束直接斷電時 .mp4 會因為沒寫檔尾整段打不開；.avi 沒正常關閉也看得到前面的內容。
+    - 每 segment_s 秒切一個檔（最多損失最後一段），檔名 ~/videos/YYYYMMDD/HHMMSS_partNN.avi，
+      同一次 enable 的分段 HHMMSS 相同。
+    - 主迴圈只丟進佇列，另一個執行緒編碼寫檔；佇列滿就丟幀，偵測迴圈不會等。
+    - 剩餘空間 < min_free_gb 就停止。
+    """
+
+    def __init__(self, root, fps=15.0, segment_s=60.0, tail_s=3.0, min_free_gb=5.0, queue_size=8):
+        import queue
+
+        self.root = os.path.expanduser(root)
+        self.fps = fps
+        self.segment_s = segment_s
+        self.tail_s = tail_s
+        self.min_free_gb = min_free_gb
+        self.queue = queue.Queue(maxsize=queue_size)
+        self.frames = 0
+        self.dropped = 0
+        self.files = 0
+        self.current_file = ""
+        self.stop_reason = ""
+        self.free_gb = Recorder._free_gb(self)
+        self.last_free_check = 0.0
+        self.last_wanted = -1e9
+        self.active = False
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def offer(self, frame, now, wanted):
+        """主迴圈每張新畫面呼叫一次。wanted = 現在該不該錄（例如機器人 enable 中）。回傳是否錄影中。"""
+        import queue
+
+        if now - self.last_free_check >= 2.0:
+            self.last_free_check = now
+            try:
+                self.free_gb = Recorder._free_gb(self)
+            except OSError:
+                pass
+        if wanted:
+            self.last_wanted = now
+        recording = now - self.last_wanted <= self.tail_s
+        if recording and self.free_gb < self.min_free_gb:
+            if not self.stop_reason:
+                self.stop_reason = f"剩餘空間 {self.free_gb:.1f} GB < {self.min_free_gb:.0f} GB"
+                print(f"⚠️ 停止錄影：{self.stop_reason}")
+            recording = False
+        elif self.free_gb >= self.min_free_gb:
+            self.stop_reason = ""
+        if recording != self.active:
+            self.active = recording
+            self._put(("start" if recording else "stop", None, datetime.now()), block=True)
+        if recording:
+            try:
+                self.queue.put_nowait(("frame", frame, datetime.now()))
+            except queue.Full:
+                self.dropped += 1
+        return recording
+
+    def _put(self, item, block):
+        import queue
+
+        try:
+            self.queue.put(item, block=block, timeout=0.5)
+        except queue.Full:
+            self.dropped += 1
+
+    def _run(self):
+        writer = None
+        session = None
+        part = 0
+        seg_start = 0.0
+        size = None
+
+        def close():
+            nonlocal writer
+            if writer is not None:
+                writer.release()
+                writer = None
+
+        while True:
+            kind, frame, stamp = self.queue.get()
+            try:
+                if kind == "start":
+                    close()
+                    session, part = stamp, 0
+                    continue
+                if kind == "stop":
+                    close()
+                    session = None
+                    continue
+                if session is None:
+                    continue
+                h, w = frame.shape[:2]
+                t = time.monotonic()
+                if writer is None or (w, h) != size or t - seg_start >= self.segment_s:
+                    close()
+                    part += 1
+                    folder = os.path.join(self.root, session.strftime("%Y%m%d"))
+                    os.makedirs(folder, exist_ok=True)
+                    path = os.path.join(folder, session.strftime("%H%M%S") + f"_part{part:02d}.avi")
+                    writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), self.fps, (w, h))
+                    if not writer.isOpened():
+                        print(f"⚠️ 開不了影片檔：{path}")
+                        writer = None
+                        continue
+                    size, seg_start = (w, h), t
+                    self.current_file = path
+                    self.files += 1
+                    print(f"🎥 錄影 → {path}")
+                writer.write(frame if frame.ndim == 3 else cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR))
+                self.frames += 1
+            except (OSError, cv2.error) as e:
+                print(f"⚠️ 錄影失敗：{e}")
+                close()
+
+    def status_text(self, recording):
+        if self.stop_reason:
+            return f"停止：空間不足 {self.free_gb:.0f}GB"
+        if recording:
+            return f"● 錄影中 {os.path.basename(self.current_file)}"
+        return f"待命（{self.files} 檔）"
+
+
 def draw(frame, dets, fps):
     img = frame.copy()
     for cls, box, conf, lit in dets:
@@ -346,6 +478,15 @@ def main():
     parser.add_argument("--record-dir", default="~/captures", help="存圖根目錄（底下自動分 YYYYMMDD 資料夾）")
     parser.add_argument("--record-quality", type=int, default=90, help="JPEG 品質")
     parser.add_argument("--record-min-free-gb", type=float, default=5.0, help="剩餘空間低於這個值就停止存圖")
+    parser.add_argument("--video", choices=["enabled", "always", "off"], default="enabled",
+                        help="自動錄影：enabled = 機器人 enable 時錄（預設）、always = 一直錄、off = 不錄")
+    parser.add_argument("--video-dir", default="~/videos", help="錄影根目錄（底下自動分 YYYYMMDD 資料夾）")
+    parser.add_argument("--video-fps", type=float, default=15.0, help="影片標示的幀率（Limelight 2 串流約 15 fps）")
+    parser.add_argument("--video-segment-s", type=float, default=60.0, help="每幾秒切一個檔")
+    parser.add_argument("--video-tail-s", type=float, default=3.0, help="disable 後再多錄幾秒")
+    parser.add_argument("--video-overlay", action="store_true", help="錄畫好框的畫面（預設錄原始畫面，可拿來訓練）")
+    parser.add_argument("--video-enabled-topic", default="/AdvantageKit/RealOutputs/Status/Enabled",
+                        help="機器人 enable 狀態的 NT topic（StatusBoard 發布的 Status/Enabled）")
     add_lock_args(parser)
     args = parser.parse_args()
 
@@ -402,7 +543,11 @@ def main():
             "recordFreeGB": table.getDoubleTopic("RecordFreeGB").publish(),
             "recordStatus": table.getStringTopic("RecordStatus").publish(),
             "recordStopReason": table.getStringTopic("RecordStopReason").publish(),
+            "videoRecording": table.getBooleanTopic("VideoRecording").publish(),
+            "videoStatus": table.getStringTopic("VideoStatus").publish(),
+            "videoFile": table.getStringTopic("VideoFile").publish(),
         }
+        robot_enabled_sub = inst.getBooleanTopic(args.video_enabled_topic).subscribe(False)
         pubs["model"].set(os.path.basename(args.model))
         # /Vision/Record：Elastic 或 OutlineViewer 設 true 就開始存圖。publish 預設值讓它出現在 NT 上可以直接改
         record_topic = table.getBooleanTopic("Record")
@@ -415,6 +560,15 @@ def main():
     print(f"存圖：{'開' if args.record else '關（NT /Vision/Record 可開）'}，{args.record_fps} 張/秒 → "
           f"{recorder.root}，剩餘 {recorder.free_gb:.1f} GB")
     last_record_pub = 0.0
+
+    video = None
+    last_video_pub, last_video_on = 0.0, None
+    if args.video != "off":
+        video = VideoRecorder(args.video_dir, args.video_fps, args.video_segment_s, args.video_tail_s,
+                              args.record_min_free_gb)
+        if args.video == "enabled" and args.print_only:
+            print("⚠️ --print-only 沒連 NT，讀不到 enable 狀態 → 不會自動錄影（要錄請用 --video always）")
+        print(f"自動錄影：{args.video} → {video.root}（剩餘 {video.free_gb:.1f} GB）")
 
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
@@ -477,6 +631,15 @@ def main():
                 pubs["recordStatus"].set(recorder.status_text(recording))
                 pubs["recordStopReason"].set(recorder.stop_reason)
 
+            if video:
+                wanted = args.video == "always" or (pubs is not None and robot_enabled_sub.get())
+                video_on = video.offer(draw(frame, dets, fps) if args.video_overlay else frame, now, wanted)
+                if pubs and (video_on != last_video_on or now - last_video_pub >= 0.5):
+                    last_video_pub, last_video_on = now, video_on
+                    pubs["videoRecording"].set(video_on)
+                    pubs["videoStatus"].set(video.status_text(video_on))
+                    pubs["videoFile"].set(os.path.basename(video.current_file))
+
             if stream and stream.wants_frame():
                 stream.publish(draw(frame, dets, fps))
             if args.save_dir and now - last_save >= args.save_every:
@@ -492,6 +655,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        if video and video.active:
+            video.offer(None, float("inf"), False)  # 送 stop，讓最後一個檔正常關閉
+            time.sleep(0.5)
         camera.release()
 
 

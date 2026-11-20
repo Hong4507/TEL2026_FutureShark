@@ -1,6 +1,7 @@
 package frc.robot.subsystems.turret;
 
 import org.littletonrobotics.junction.Logger;
+import org.littletonrobotics.junction.networktables.LoggedNetworkBoolean;
 import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
 
 import org.wpilib.command2.SubsystemBase;
@@ -20,6 +21,12 @@ public class Turret extends SubsystemBase {
   private static final LoggedNetworkNumber shotDetectRpm =
       new LoggedNetworkNumber("/Tuning/Turret/ShotDetectRpm", TurretConstants.kShotDetectRpm);
 
+  /**
+   * 11/20 暫時測試用：假擊發。true → 擊發 SparkMax 不轉（一律送 0 V），射出偵測改看「有沒有下擊發指令」：
+   * 擊發指令結束的那一刻 = 射出一顆，ShootFeed 等照常反應。⚠️ 比賽前確認是 false（開機預設 false）。
+   */
+  private static final LoggedNetworkBoolean dryFire = new LoggedNetworkBoolean("/Tuning/Turret/DryFire", false);
+
   public Turret(TurretIO io) {
     this.io = io;
   }
@@ -29,6 +36,7 @@ public class Turret extends SubsystemBase {
     io.updateInputs(inputs);
     Logger.processInputs("Turret", inputs);
     Logger.recordOutput("Turret/TriggerStopped", isTriggerStopped());
+    Logger.recordOutput("Turret/DryFire", dryFire.get());
   }
 
   public void setVelocity(double upVelocityRadPerSec, double downVelocityRadPerSec) {
@@ -79,7 +87,7 @@ public class Turret extends SubsystemBase {
       Logger.recordOutput("Turret/ShotCount", shotCount);
     }
     triggerOn = volts > 0;
-    io.setTrigger(volts);
+    io.setTrigger(dryFire.get() ? 0 : volts);
   }
 
   public void setAimHeight(double heightMeters) {
@@ -97,6 +105,7 @@ public class Turret extends SubsystemBase {
 
   /** 擊發 SparkMax 轉速（|RPM|）低於 {@link TurretConstants#kShotDetectRpm} = 停著。 */
   public boolean isTriggerStopped() {
+    if (dryFire.get()) return !triggerOn;
     return Math.abs(inputs.triggerVelocityRpm) < shotDetectRpm.get();
   }
 

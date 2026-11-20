@@ -41,6 +41,14 @@ public class VisionTurnAlign extends Command {
   private static final LoggedNetworkNumber kTolerance = new LoggedNetworkNumber("/Tuning/VisionTurnAlign/ToleranceMeters", 0.02);
   /** 最多轉幾度（相對正對牆面）。轉太多射擊距離、車身 Luna 都會變差。 */
   private static final LoggedNetworkNumber kMaxTurnDeg = new LoggedNetworkNumber("/Tuning/VisionTurnAlign/MaxTurnDeg", 30);
+  /**
+   * 11/20：瞄準修正（度，正 = 對準後再<b>順時針</b>多轉這麼多，射擊方向往車尾那側）。
+   * 實機：VisionTurnAlign 對準完要再順時針多轉一點點才準。1° 是先猜的，3.3 m 外落點沿牆約移 5.8 cm；
+   * 射偏往車頭那側就加大、往車尾那側就減小（每 1° ≈ 射擊距離 × 1.75 cm/m）。
+   */
+  private static final LoggedNetworkNumber kAimTrimDeg = new LoggedNetworkNumber("/Tuning/VisionTurnAlign/AimTrimDeg", 1.0);
+  /** 測試用：換掉瞄準修正的來源。 */
+  static java.util.function.DoubleSupplier aimTrimDeg = kAimTrimDeg::get;
   /** 被轉角上限擋住、停著也到不了：連續這麼多張畫面就放棄（不要等 8 秒逾時）。 */
   private static final int kClampedGiveUpFrames = 5;
 
@@ -115,7 +123,8 @@ public class VisionTurnAlign extends Command {
     var yaw = RangeSensors.get().getYaw();
     if (yaw == null) return h;
     double wallYaw = yaw.in(org.wpilib.units.Units.Radians) - Math.PI / 2;
-    return Double.isFinite(wallYaw) ? h - wallYaw : h;
+    // 偏角 > 45° = 牆面基準不對（或沒對著九宮格），不用它
+    return Double.isFinite(wallYaw) && Math.abs(wallYaw) < Math.toRadians(45) ? h - wallYaw : h;
   }
 
   private double heading() {
@@ -149,16 +158,18 @@ public class VisionTurnAlign extends Command {
     double shooterRay = rangeSensor.getTargetDistance() / cos;
     double cameraDistance = Vision.cameraDistance(rangeSensor.getTargetDistance()) / cos;
 
+    // 瞄準修正換算成沿牆公尺：對準完成時，視覺誤差應該停在 +bias（目標在射球點往車頭側一點 = 車子多順時針轉）
+    double bias = shooterRay * Math.tan(Math.toRadians(aimTrimDeg.getAsDouble()));
     if (vision.hasNewFrame()) {
       OptionalDouble measured;
       if (isLocked()) {
-        double predicted = shooterRay * Math.tan(MathUtil.angleModulus(targetHeading - h));
+        double predicted = shooterRay * Math.tan(MathUtil.angleModulus(targetHeading - h)) + bias;
         measured = Vision.nearest(vision.getColumnErrors(cameraDistance), predicted, kTrackGateMeters);
       } else {
         measured = acquire(cameraDistance);
       }
       if (measured.isPresent()) {
-        double e = measured.getAsDouble();
+        double e = measured.getAsDouble() - bias;
         lastError = e;
         // 誤差是拍照當下的：用那時候的朝向算目標角度，轉動中才不會多轉
         double captured = headingAt(now - vision.getFrameLatencySeconds() - kExtraLatency.get());
@@ -190,12 +201,14 @@ public class VisionTurnAlign extends Command {
     turning = wheel != 0;
 
     Logger.recordOutput("VisionTurnAlign/Locked", isLocked());
+    // 已扣掉 AimTrim：對準完成時這個 ≈ 0
     Logger.recordOutput("VisionTurnAlign/ErrorMeters", lastError);
     Logger.recordOutput("VisionTurnAlign/HeadingErrorMeters", errMeters);
     Logger.recordOutput("VisionTurnAlign/TurnedDeg", Math.toDegrees(turnedRad()));
     Logger.recordOutput("VisionTurnAlign/WheelMps", wheel);
     Logger.recordOutput("VisionTurnAlign/SettledFrames", settledFrames);
     Logger.recordOutput("VisionTurnAlign/Clamped", clampedFrames > 0);
+    Logger.recordOutput("VisionTurnAlign/AimTrimMeters", bias);
   }
 
   private OptionalDouble acquire(double distance) {

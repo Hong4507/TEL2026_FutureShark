@@ -8,18 +8,20 @@ import org.littletonrobotics.junction.Logger;
 import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
 import org.wpilib.command2.Command;
 import org.wpilib.command2.Commands;
+import org.wpilib.system.Timer;
 
 import com.pathplanner.lib.commands.PathPlannerAuto;
 
 import frc.FSLib.rangefinder.RangeSensors;
 import frc.robot.commands.drive.DriveDistance;
-import frc.robot.commands.drive.LaserAlign;
 import frc.robot.commands.drive.LidarTurnScan;
 import frc.robot.commands.drive.TurnByAngle;
 import frc.robot.commands.drive.VisionAlign;
 import frc.robot.commands.drive.VisionTurnAlign;
+import frc.robot.commands.storage.ShootFeed;
 import frc.robot.commands.turret.ColumnShot;
 import frc.robot.subsystems.drive.Drive;
+import frc.robot.subsystems.storage.Stroage;
 import frc.robot.subsystems.turret.Turret;
 import frc.robot.subsystems.turret.TurretConstants;
 import frc.robot.subsystems.turretlidar.TurretLidar;
@@ -37,20 +39,19 @@ public final class AutoRoutines {
   private AutoRoutines() {}
 
   /**
-   * 11/19：自動流程射擊距離（= RangeSensor/TargetDistance，DownShooter 輪心到九宮格），最佳射程 3.2–3.3 m → 3.25。
-   * 起點車頭朝九宮格時，自動開始會先轉 90° 量距離，差超過 {@link #kShootDistanceToleranceMeters} 就轉回去前後走到這個距離。
-   * 砲台 Luna（23°）在 TargetDistance 3.27 m 時光束打中列中心、有效 2.92–3.62 m；3.0 m 光束打在中列洞偏下，洞比較窄。
-   */
-  private static final LoggedNetworkNumber kShootDistance = new LoggedNetworkNumber("/Tuning/Auto/ShootDistanceMeters", 3.25);
-  /**
-   * 11/19：起點離九宮格 5.8–7.0 m（TargetDistance）。先朝九宮格盲走這麼遠（5.8 − 3.25），剩 3.25–4.45 m 再轉過去用 Luna 量。
+   * 11/19：起點離九宮格 5.8–7.0 m（TargetDistance）。先朝九宮格盲走這麼遠，再逆時針轉 90° 讓右側朝九宮格。
+   * 11/20：轉完<b>不再前後走到固定射程</b>，原地用融合距離（Luna×2／Luna單邊+IMU／Limelight）查射擊表。
+   * 砲台 Luna（23°）有效 TargetDistance 約 2.92–3.62 m → 起點超過約 6.2 m 時可能找不到洞（找不到就不射）。
    */
   private static final LoggedNetworkNumber kBlindApproach = new LoggedNetworkNumber("/Tuning/Auto/BlindApproachMeters", 2.55);
   /** 11/20：原地轉找到洞後先停穩再射（剛停下來車身還會轉一點，第一發會偏）。 */
   private static final double kScanSettleSec = 0.3;
-  /** 量不到距離時再往前走多少（公尺）。 */
-  private static final double kRetryStepMeters = 0.6;
-  private static final double kShootDistanceToleranceMeters = 0.05;
+  /** 11/20：每發之間至少隔幾秒（擊發到擊發），讓 ShootFeed 送下一顆球上來。 */
+  private static final LoggedNetworkNumber kShotInterval = new LoggedNetworkNumber("/Tuning/Auto/ShotIntervalSec", 5.0);
+  /** 每發前確認砲台 Luna 還在洞裡：最多等這麼久。 */
+  private static final double kAimConfirmSec = 0.3;
+  /** 確認時不在洞裡 → 原地左右各小掃這麼多度重新找洞；還是找不到就不射了。 */
+  private static final double kReacquireDeg = 6;
 
   /** 等亮燈加分格出現的最長時間（秒）。超過就當作燈沒亮 / 辨識不到，改打中欄、不打加分格。 */
   public static final double kLitWaitSeconds = 2.0;
@@ -135,7 +136,9 @@ public final class AutoRoutines {
     /** 往前走、用砲台 TF-Luna 找洞（不用視覺）；被擋住就原地轉找洞。 */
     LUNA("砲台Luna找洞"),
     /** 原本的視覺流程（加分洞＋VisionAlign）。 */
-    VISION("視覺");
+    VISION("視覺"),
+    /** 11/20：只盲走＋轉向（右側朝九宮格）就停，不瞄準、不射，飛輪不轉。測試起點擺法／轉向用。 */
+    APPROACH_ONLY("只盲走＋轉向");
 
     public final String label;
 
@@ -163,101 +166,72 @@ public final class AutoRoutines {
     }
 
     public String describe() {
-      if (method == AutoMethod.LUNA) return halfLabel() + "・" + side.label + "・" + method.label;
+      if (method != AutoMethod.VISION) return halfLabel() + "・" + side.label + "・" + method.label;
       return halfLabel() + "・" + side.label + "・" + (runPath ? "跑路徑" : "不跑路徑") + "・" + column.label;
     }
   }
 
   /** 依 {@link Plan#method()} 產生自動流程。 */
   public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Plan plan) {
-    return build(drive, vision, turret, turretLidar, plan, 0);
+    return build(drive, vision, turret, turretLidar, null, plan, 0);
+  }
+
+  public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Plan plan,
+      double startYawToWallDeg) {
+    return build(drive, vision, turret, turretLidar, null, plan, startYawToWallDeg);
   }
 
   /**
+   * @param stroage 不是 null 時，整段自動流程一起跑 {@link ShootFeed}（偵測到射出 → Storage／L298N Trigger 送下一顆）。
    * @param startYawToWallDeg 起點擺放時車身相對「右側正對九宮格」的偏角（度，逆時針為正；同 {@code /Tuning/RangeSensor/StartYawToWallDeg}）。
-   *     11/19 起車頭朝九宮格 = −90。不是 0 時，先原地轉 −startYawToWallDeg 讓右側朝九宮格、再 LaserAlign 擺正
-   *     （Luna 找洞和「不跑路徑」的視覺流程都假設右側朝九宮格；跑 PathPlanner 路徑時由路徑決定，不額外轉）。
+   *     11/19 起車頭朝九宮格 = −90。不是 0 時：先朝九宮格盲走 {@link #kBlindApproach}，再原地轉 −startYawToWallDeg
+   *     （−90 → 逆時針 90°）讓右側朝九宮格，然後直接接主流程（11/20：不再前後走到固定射程，也不 LaserAlign）。
+   *     Luna 找洞和「不跑路徑」的視覺流程都假設右側朝九宮格；跑 PathPlanner 路徑時由路徑決定，不額外轉。
    */
-  public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Plan plan,
-      double startYawToWallDeg) {
-    Command main = plan.method() == AutoMethod.LUNA
-        ? lunaColumn(drive, turret, turretLidar, plan)
-        : bonusThenColumn(drive, vision, turret, plan);
-    boolean needsTurn = Math.abs(startYawToWallDeg) > 1 && (plan.method() == AutoMethod.LUNA || !plan.runPath());
-    if (!needsTurn) return main;
-    double yaw = Math.toRadians(startYawToWallDeg);
-    // 車頭方向往牆的分量（−90 → 1：車頭朝牆；+90 → −1：車尾朝牆）
-    double towardWall = Math.cos(-Math.PI / 2 - yaw);
-    double[] measured = {Double.NaN};
-    // 起點朝向（陀螺儀）；之後轉向都用絕對角度：朝九宮格 = start、右側朝九宮格 = start − yaw
-    double[] start = {0};
-    DoubleSupplier faceGrid = () -> start[0];
-    DoubleSupplier faceWall = () -> start[0] - yaw;
-    return Commands.sequence(
-      Commands.runOnce(() -> start[0] = drive.getGyroYawRad()),
-      // 11/19：起點離九宮格 5.8–7.0 m，車身 Luna 在黑板上量不到那麼遠 → 先盲走（編碼器）
-      log("BlindApproach"),
-      Commands.parallel(Commands.runOnce(() -> spinUp(turret)),
-          new DriveDistance(drive, () -> kBlindApproach.get() / towardWall)),
-      log("TurnToWall"),
-      TurnByAngle.toHeading(drive, faceWall),
-      measure(measured),
-      // 量不到（還太遠）→ 轉回去再往前 0.6 m 再量，最多 2 次
-      retryMeasure(drive, faceGrid, faceWall, towardWall, measured),
-      retryMeasure(drive, faceGrid, faceWall, towardWall, measured),
-      Commands.either(
-        Commands.sequence(
-          log("DriveToRange"),
-          TurnByAngle.toHeading(drive, faceGrid),
-          new DriveDistance(drive, () -> (measured[0] - kShootDistance.get()) / towardWall),
-          TurnByAngle.toHeading(drive, faceWall)
-        ),
-        Commands.none(),
-        () -> Double.isFinite(measured[0]) && Math.abs(towardWall) > 0.5
-            && Math.abs(measured[0] - kShootDistance.get()) > kShootDistanceToleranceMeters
-      ),
-      log("SquareUp"),
-      new LaserAlign(drive),
-      main
-    ).withName(main.getName());
-  }
-
-  /** 等 Luna 讀值穩定後量 TargetDistance；沒有有效牆距 = NaN。 */
-  private static Command measure(double[] measured) {
-    return Commands.sequence(
-      Commands.waitSeconds(0.3),
-      Commands.runOnce(() -> {
-        var rs = RangeSensors.get();
-        measured[0] = rs.getWallDistanceMeters().isPresent() ? rs.getTargetDistance() : Double.NaN;
-        Logger.recordOutput("Auto/StartDistanceMeters", measured[0]);
-      })
-    );
-  }
-
-  /** 還沒量到距離時：轉回去朝九宮格、往前 {@link #kRetryStepMeters}、轉回來再量。 */
-  private static Command retryMeasure(Drive drive, DoubleSupplier faceGrid, DoubleSupplier faceWall, double towardWall,
-      double[] measured) {
-    return Commands.either(
-      Commands.none(),
-      Commands.sequence(
-        log("MeasureRetry"),
-        TurnByAngle.toHeading(drive, faceGrid),
-        new DriveDistance(drive, () -> kRetryStepMeters / towardWall),
-        TurnByAngle.toHeading(drive, faceWall),
-        measure(measured)
-      ),
-      () -> Double.isFinite(measured[0]) || Math.abs(towardWall) < 0.5
-    );
+  public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Stroage stroage,
+      Plan plan, double startYawToWallDeg) {
+    boolean approachOnly = plan.method() == AutoMethod.APPROACH_ONLY;
+    Command main = switch (plan.method()) {
+      case LUNA -> lunaColumn(drive, turret, turretLidar, plan);
+      case VISION -> bonusThenColumn(drive, vision, turret, plan);
+      case APPROACH_ONLY -> log("Done").withName("Auto-" + plan.describe());
+    };
+    String name = main.getName();
+    boolean needsTurn = Math.abs(startYawToWallDeg) > 1 && (plan.method() != AutoMethod.VISION || !plan.runPath());
+    if (needsTurn) {
+      double yaw = Math.toRadians(startYawToWallDeg);
+      // 車頭方向往牆的分量（−90 → 1：車頭朝牆；+90 → −1：車尾朝牆）
+      double towardWall = Math.cos(-Math.PI / 2 - yaw);
+      // 起點朝向（陀螺儀）；右側朝九宮格 = start − yaw（yaw = −90° → 逆時針 90°）
+      double[] start = {0};
+      main = Commands.sequence(
+        Commands.runOnce(() -> start[0] = drive.getGyroYawRad()),
+        // 起點離九宮格 5.8–7.0 m，車身 Luna 在黑板上量不到那麼遠 → 盲走（編碼器）
+        log("BlindApproach"),
+        // 11/20：盲走時飛輪不轉，瞄準完才加速
+        Math.abs(towardWall) > 0.5 ? new DriveDistance(drive, () -> kBlindApproach.get() / towardWall) : Commands.none(),
+        log("TurnToWall"),
+        TurnByAngle.toHeading(drive, () -> start[0] - yaw),
+        main
+      );
+    }
+    if (stroage != null && !approachOnly) {
+      main = Commands.deadline(main, new ShootFeed(stroage, turret::isTriggerStopped));
+    }
+    return main.withName(name);
   }
 
   /**
    * 不用視覺的自動流程（11/15 隊員指定）：
    * <ol>
-   *   <li>11/20：<b>不沿牆走</b>（會撞到場地 Frame）。飛輪開始轉＋原地轉找洞（{@link LidarTurnScan}）：
+   *   <li>11/20：<b>不沿牆走</b>（會撞到場地 Frame）。原地轉找洞（{@link LidarTurnScan}，飛輪不轉）：
    *       先往起點決定的方向掃（{@link Plan#lunaDirection()}，往中欄那側），沒找到轉回來再掃另一側。</li>
-   *   <li>找到 → 低／中／高各射 {@link Half#ballsPerHole()} 發（上半場預設 3），距離用 正對距離 / cos(轉角)。</li>
+   *   <li>找到 → 低／中／高各射 {@link Half#ballsPerHole()} 發（上半場預設 3）。</li>
+   *   <li>11/20：每發前確認砲台 Luna 還在洞裡（= 對到 Column）才射；不在 → 左右小掃 {@link #kReacquireDeg}° 重找，
+   *       還是找不到就停止，剩下的不射。每發之間至少隔 {@link #kShotInterval} 秒（ShootFeed 送球）。</li>
+   *   <li>距離：融合距離（Luna×2／Luna單邊+IMU／Limelight，即時讀）/ cos(相對正對牆面的轉角)。</li>
    *   <li>兩邊都沒找到 → 不射。</li>
-   *   <li>砲台 Luna 停用或斷線 → 原地直接射（等於人工擺位）。</li>
+   *   <li>砲台 Luna 停用或斷線 → 原地直接射（等於人工擺位），照樣每發隔 {@link #kShotInterval} 秒。</li>
    * </ol>
    */
   public static Command lunaColumn(Drive drive, Turret turret, TurretLidar turretLidar, Plan plan) {
@@ -267,42 +241,115 @@ public final class AutoRoutines {
     Logger.recordOutput("Auto/Plan", plan.describe());
     LidarTurnScan scan = new LidarTurnScan(drive, turretLidar, dir);
     LidarTurnScan scanBack = new LidarTurnScan(drive, turretLidar, -dir);
-    double[] squareDistance = {Double.NaN};
+    // 正對牆面時的朝向（用車身 Luna／IMU 算出的牆面偏角修正；沒有就當作掃描前是正對的）
     double[] squareHeading = {0};
-    DoubleSupplier slanted = () -> squareDistance[0]
-        / Math.max(Math.cos(drive.getPose().getRotation().getRadians() - squareHeading[0]), 0.5);
+    DoubleSupplier slanted = slantedDistance(drive, () -> squareHeading[0]);
+    ShotState shots = new ShotState();
     return Commands.sequence(
-      Commands.runOnce(() -> spinUp(turret)),
+      // 11/20：找洞時飛輪不轉；找到洞（瞄準完畢）才加速。Luna 不能用時由 ColumnShot 自己加速
+      // 判斷 Luna 能不能用之前先等一下（剛開始可能還沒讀到第一筆、或短暫斷線），不要直接當成斷線原地射
+      Commands.waitUntil(turretLidar::isUsable).withTimeout(0.5),
       Commands.either(
-        Commands.sequence(log("Luna-Unavailable-Shoot"), columnShots(turret, perHole, null)),
+        Commands.sequence(log("Luna-Unavailable-Shoot"), columnShots(turret, perHole, null, shots, null)),
         Commands.sequence(
           log("Luna-TurnScan"),
-          Commands.runOnce(() -> {
-            squareDistance[0] = RangeSensors.get().getTargetDistance();
-            squareHeading[0] = drive.getPose().getRotation().getRadians();
-          }),
+          Commands.runOnce(() -> squareHeading[0] = VisionTurnAlign.squareHeadingNow(drive)),
           scan,
           Commands.either(Commands.none(), Commands.sequence(log("Luna-TurnScanBack"), scanBack), scan::found),
           Commands.either(
-            Commands.sequence(log("Luna-ScanShoot"), Commands.waitSeconds(kScanSettleSec), columnShots(turret, perHole, slanted)),
+            Commands.sequence(log("Luna-ScanShoot"),
+                // 停在洞裡原地射，每發隔 5 s：不要讓砲台 Luna 把洞後面的箱子學成板子
+                Commands.runOnce(() -> turretLidar.setHoldInHole(true)),
+                Commands.runOnce(() -> spinUp(turret)),
+                Commands.waitSeconds(kScanSettleSec),
+                columnShots(turret, perHole, slanted, shots, () -> confirmAim(drive, turretLidar, dir, shots))),
             log("Luna-NoHole"),
             () -> scan.found() || scanBack.found())
         ),
         () -> !turretLidar.isUsable()),
-      log("Done")
+      Commands.runOnce(() -> Logger.recordOutput("Auto/Stage", shots.lost ? "Done-LostHole" : "Done")).ignoringDisable(true)
     ).finallyDo(() -> {
       turret.setVelocity(0);
       turret.setTrigger(0);
+      turretLidar.setHoldInHole(false);
     }).withName("Auto-" + plan.describe());
   }
 
-  /** 低、中、高各 count 發，飛輪不停。 */
-  private static Command columnShots(Turret turret, int count, DoubleSupplier distance) {
+  /** 一次自動流程裡的射擊狀態（每發間隔、是不是對不到洞了）。 */
+  private static final class ShotState {
+    /** 上一發 ColumnShot 結束的時間；NaN = 還沒射過。 */
+    double lastShotEnd = Double.NaN;
+    /** 確認時對不到洞、重找也找不到 → 剩下的都不射。 */
+    boolean lost = false;
+  }
+
+  /** 融合距離（即時）/ cos(現在朝向 − 正對朝向)。 */
+  private static DoubleSupplier slantedDistance(Drive drive, DoubleSupplier squareHeading) {
+    return () -> {
+      double d = RangeSensors.get().getTargetDistance()
+          / Math.max(Math.cos(drive.getPose().getRotation().getRadians() - squareHeading.getAsDouble()), 0.5);
+      Logger.recordOutput("Auto/ShotDistanceMeters", d);
+      return d;
+    };
+  }
+
+  /**
+   * 射前確認砲台 Luna 在洞裡：等最多 {@link #kAimConfirmSec}；不在 → 往 dir 再往 −dir 各小掃 {@link #kReacquireDeg}°，
+   * 都找不到 → {@link ShotState#lost} = true。
+   */
+  private static Command confirmAim(Drive drive, TurretLidar lidar, double dir, ShotState shots) {
+    LidarTurnScan a = new LidarTurnScan(drive, lidar, dir, kReacquireDeg);
+    LidarTurnScan b = new LidarTurnScan(drive, lidar, -dir, kReacquireDeg);
     return Commands.sequence(
-      new ColumnShot(turret, kLowTargetHeight, count, false, distance),
-      new ColumnShot(turret, kMidTargetHeight, count, false, distance),
-      new ColumnShot(turret, kHighTargetHeight, count, false, distance)
+      Commands.waitUntil(lidar::isRawThroughHole).withTimeout(kAimConfirmSec),
+      Commands.either(
+        Commands.none(),
+        Commands.sequence(
+          log("Luna-Reacquire"),
+          a,
+          Commands.either(Commands.none(), b, a::found),
+          Commands.waitSeconds(kScanSettleSec)
+        ),
+        lidar::isRawThroughHole),
+      Commands.runOnce(() -> {
+        boolean ok = lidar.isRawThroughHole();
+        Logger.recordOutput("Auto/AimConfirmed", ok);
+        if (!ok) {
+          shots.lost = true;
+          Logger.recordOutput("Auto/Stage", "Luna-LostHole");
+        }
+      })
     );
+  }
+
+  /** 低、中、高各 count 發，飛輪不停；每發一顆一顆射（見 {@link #spacedShot}）。 */
+  private static Command columnShots(Turret turret, int count, DoubleSupplier distance, ShotState shots,
+      java.util.function.Supplier<Command> aim) {
+    java.util.List<Command> list = new java.util.ArrayList<>();
+    for (double height : new double[] {kLowTargetHeight, kMidTargetHeight, kHighTargetHeight}) {
+      for (int i = 0; i < count; i++) {
+        list.add(spacedShot(turret, height, distance, shots, aim == null ? null : aim.get()));
+      }
+    }
+    return Commands.sequence(list.toArray(Command[]::new));
+  }
+
+  /**
+   * 一發：等到距離上一發擊發滿 {@link #kShotInterval} 秒 → （有給 aim 時）確認對準 → 對準了才射 1 發。
+   * {@link ShotState#lost} 之後的都跳過。
+   */
+  private static Command spacedShot(Turret turret, double height, DoubleSupplier distance, ShotState shots, Command aim) {
+    Command shot = Commands.sequence(
+      Commands.waitUntil(() -> Double.isNaN(shots.lastShotEnd)
+          || Timer.getTimestamp() - shots.lastShotEnd >= kShotInterval.get() - ColumnShot.kCycleSec),
+      aim == null ? Commands.none() : aim,
+      Commands.either(
+        Commands.none(),
+        new ColumnShot(turret, height, 1, false, distance)
+            .finallyDo(() -> shots.lastShotEnd = Timer.getTimestamp()),
+        () -> shots.lost)
+    );
+    return Commands.either(Commands.none(), shot, () -> shots.lost);
   }
 
   /** 舊介面：跑 PathPlanner 路徑、沒亮燈打中欄。 */
@@ -314,7 +361,7 @@ public final class AutoRoutines {
   /**
    * 前 60 秒自動流程：
    * <ol>
-   *   <li>飛輪開始轉（§8.6，整段不停）＋（選了跑路徑時）PathPlanner 開到中欄。</li>
+   *   <li>（選了跑路徑時）PathPlanner 開到中欄。11/20：飛輪等第一次對準完才加速（之後整段不停，§8.6）。</li>
    *   <li>等最多 {@link #kLitWaitSeconds} 秒找亮燈加分洞 → 對準亮燈那欄、射加分洞；找不到就對 {@link Plan#fallbackColumn()}。</li>
    *   <li>同一欄低／中／高，每發前重新對準 NEAREST，對準失敗重試 1 次（§8.8）。</li>
    *   <li>11/20：對準改成<b>原地轉</b>（{@link VisionTurnAlign}），不沿牆走；射擊距離用 正對距離 / cos(轉角)。</li>
@@ -336,12 +383,11 @@ public final class AutoRoutines {
     // 車身正對牆面時的朝向（路徑跑完後用車身 Luna 的牆面偏角算；沒有偏角就當作那時是正對的）；之後原地轉對準都相對這個角度
     double[] square = {0};
     DoubleSupplier squareHeading = () -> square[0];
+    ShotState shots = new ShotState();
     return Commands.sequence(
       log(plan.runPath() ? "Path" : "NoPath"),
-      Commands.parallel(
-        Commands.runOnce(() -> spinUp(turret)),
-        plan.runPath() ? new PathPlannerAuto(plan.side().pathAuto) : Commands.none()
-      ),
+      // 11/20：跑路徑、找欄時飛輪不轉；第一次對準完才加速
+      plan.runPath() ? new PathPlannerAuto(plan.side().pathAuto) : Commands.none(),
       Commands.runOnce(() -> square[0] = VisionTurnAlign.squareHeadingNow(drive)),
       log("WaitLit"),
       Commands.waitUntil(() -> litVisible(vision)).withTimeout(kLitWaitSeconds),
@@ -349,19 +395,21 @@ public final class AutoRoutines {
         Commands.sequence(
           log("AlignLit"),
           alignWithRetry(drive, vision, VisionAlign.Target.LIT, squareHeading),
+          Commands.runOnce(() -> spinUp(turret)),
           log("Bonus"),
-          alignedShots(drive, vision, turret, kSpecialTargetHeight, bonusBalls, squareHeading)
+          alignedShots(drive, vision, turret, kSpecialTargetHeight, bonusBalls, squareHeading, shots)
         ),
         Commands.sequence(
           log("NoLit-Align" + fallback.name()),
-          alignWithRetry(drive, vision, fallback, squareHeading)
+          alignWithRetry(drive, vision, fallback, squareHeading),
+          Commands.runOnce(() -> spinUp(turret))
         ),
         () -> litVisible(vision)
       ),
       log("Column"),
-      alignedShots(drive, vision, turret, kLowTargetHeight, ballsPerHole, squareHeading),
-      alignedShots(drive, vision, turret, kMidTargetHeight, ballsPerHole, squareHeading),
-      alignedShots(drive, vision, turret, kHighTargetHeight, ballsPerHole, squareHeading),
+      alignedShots(drive, vision, turret, kLowTargetHeight, ballsPerHole, squareHeading, shots),
+      alignedShots(drive, vision, turret, kMidTargetHeight, ballsPerHole, squareHeading, shots),
+      alignedShots(drive, vision, turret, kHighTargetHeight, ballsPerHole, squareHeading, shots),
       log("Done")
     ).finallyDo(() -> {
       turret.setVelocity(0);
@@ -391,17 +439,17 @@ public final class AutoRoutines {
     );
   }
 
-  /** 每一發前先用視覺對準最近的一欄（原地轉），再射一發。飛輪不停（§8.6）。距離 = 正對距離 / cos(轉角)。 */
+  /**
+   * 每一發前先用視覺對準最近的一欄（原地轉），再射一發。飛輪不停（§8.6）。距離 = 正對距離 / cos(轉角)。
+   * 11/20：每發之間至少隔 {@link #kShotInterval} 秒（ShootFeed 送球）。
+   */
   private static Command alignedShots(Drive drive, Vision vision, Turret turret, double height, int count,
-      DoubleSupplier squareHeading) {
-    DoubleSupplier slanted = () -> RangeSensors.get().getTargetDistance()
-        / Math.max(Math.cos(drive.getPose().getRotation().getRadians() - squareHeading.getAsDouble()), 0.5);
+      DoubleSupplier squareHeading, ShotState state) {
+    DoubleSupplier slanted = slantedDistance(drive, squareHeading);
     Command[] shots = new Command[count];
     for (int i = 0; i < count; i++) {
-      shots[i] = Commands.sequence(
-        alignWithRetry(drive, vision, VisionAlign.Target.NEAREST, squareHeading),
-        new ColumnShot(turret, height, 1, false, slanted)
-      );
+      shots[i] = spacedShot(turret, height, slanted, state,
+          alignWithRetry(drive, vision, VisionAlign.Target.NEAREST, squareHeading));
     }
     return Commands.sequence(shots);
   }

@@ -12,8 +12,10 @@ import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
 import org.wpilib.math.util.MathUtil;
 import org.littletonrobotics.junction.Logger;
 import org.wpilib.command2.Command;
+import org.wpilib.command2.CommandScheduler;
 import org.wpilib.command2.Commands;
 import org.wpilib.command2.button.Trigger;
+import org.wpilib.math.filter.Debouncer;
 import frc.FSLib.rangefinder.RangeSensors;
 import frc.robot.Constants.FieldConstants;
 import frc.robot.Constants.RobotMode;
@@ -28,6 +30,7 @@ import frc.robot.commands.drive.VisionAlign;
 import frc.robot.commands.drive.DriveCommands;
 import frc.robot.commands.storage.Normal;
 import frc.robot.commands.storage.ShootFeed;
+import frc.robot.commands.storage.TriggerRun;
 import frc.robot.commands.turret.AssistTurret;
 import frc.robot.commands.turret.ColumnShot;
 import frc.robot.commands.turret.ManualTurret;
@@ -102,6 +105,8 @@ public class RobotContainer {
    */
   private final LoggedNetworkNumber startYawToWallDeg = new LoggedNetworkNumber("/Tuning/RangeSensor/StartYawToWallDeg", -90.0);
   /** Elastic 按鈕：設 true → 以「現在車身相對牆面 = StartYawToWallDeg」設定基準，然後自動跳回 false。 */
+  /** 開機後等多久（陀螺儀有讀值）再用開機擺放角度設定牆面基準。 */
+  private static final double kBootSeedDelaySec = 0.5;
   private final LoggedNetworkBoolean seedWallHeadingNow = new LoggedNetworkBoolean("/Tuning/RangeSensor/SeedWallHeadingNow", false);
 
   public RobotContainer() {
@@ -171,6 +176,7 @@ public class RobotContainer {
     alignChooser.add("LaserAlign（擺正牆面）", AlignMethod.LASER);
     autoMethodChooser.addDefault("砲台Luna找洞（不用視覺）", AutoMethod.LUNA);
     autoMethodChooser.add("視覺（加分洞＋VisionAlign）", AutoMethod.VISION);
+    autoMethodChooser.add("只盲走＋轉向（不瞄準、不射）", AutoMethod.APPROACH_ONLY);
     scoreboard = new Scoreboard(turret, vision, () -> currentPlan().half());
     // 開機就給 Auto/Stage 一個值，Elastic 的「Auto 階段」才不會是空的
     Logger.recordOutput("Auto/Stage", "Idle");
@@ -179,7 +185,7 @@ public class RobotContainer {
     new StatusBoard(drive, turret, vision, turretLidar, () -> controller.getHID().isConnected(),
         () -> autoChooser.get() != null && autoChooser.get().selected() ? currentPlan() : null);
     Logger.recordOutput("Mode", "disable");
-    // Assist 射擊中（右開關開）左搖桿 X 是擊發 → 底盤不吃搖桿，避免一擊發就轉向
+    // Manual／Assist 射擊中（右開關開）左搖桿 X 是擊發、Y 往前是手動 Trigger → 底盤鎖住（速度 0），避免一擊發就轉向
     drive.setDefaultCommand(DriveCommands.arcadeDrive(drive,
         () -> holdDrive() ? 0 : controller.getLeftY(),
         () -> holdDrive() ? 0 : -controller.getLeftX()));
@@ -189,11 +195,22 @@ public class RobotContainer {
     // 舊條件（只排除 Manual）會讓 Storage 全部轉起來。自動流程是在 kDisable 模式下跑的，所以跑自動時照轉。
     stroage.setDefaultCommand(new Normal(stroage, this::storageRunsByDefault));
     // 11/19：右開關打開（射擊模式）→ Storage 和 L298N Trigger 分開控制：
-    // 偵測到射出（擊發 SparkMax 轉速掉到門檻以下）→ Trigger＋Storage 一起轉 kShotFeedTriggerSec（2 s）
-    // → Storage 停、Trigger 繼續轉 kShotFeedStorageSec（0.7 s）→ 停
-    // 11/20：Assist 射擊中左搖桿往前推（Y < 0）→ L298N Trigger 手動正轉
-    controller.rightSwitch().and(isFeed().negate()).whileTrue(new ShootFeed(stroage, turret::isTriggerStopped,
-        () -> assistShooting() && controller.getLeftY() < -kManualTriggerThreshold));
+    // 偵測到射出（擊發 SparkMax 轉速掉到門檻以下）→ Trigger 單獨轉 kShotFeedPreTriggerSec（0.7 s）
+    // → Trigger＋Storage 一起轉 kShotFeedTriggerSec（1.7 s）→ Storage 停、Trigger 繼續轉 kShotFeedStorageSec（0.7 s）→ 停
+    // 11/20：自動流程自己會跑 ShootFeed（要求 stroage）→ 自動中撥右開關不能排這個，不然會把整個自動流程中斷
+    // 11/20：Manual／Assist 射擊中左搖桿往前推（Y > 0；這支 FlySky 往上推是正值）→ 中斷 ShootFeed，改跑 TriggerRun（只有 L298N Trigger 一直轉）；
+    // 放開後 Storage／Trigger 都停，等再射一發才重新啟動 ShootFeed（見下面 shotJustFired），或右開關關掉再打開
+    controller.rightSwitch().and(isFeed().negate()).and(() -> !autoRunning)
+        .whileTrue(new ShootFeed(stroage, turret::isTriggerStopped));
+    // 搖桿放開後多撐 0.3 s 才停：L298N 一啟動電壓掉、FlySky 斷線一下時搖桿會歸零，不要因此把 TriggerRun 取消
+    new Trigger(this::manualTriggerPushed).debounce(kManualTriggerReleaseSec, Debouncer.DebounceType.FALLING)
+        .and(() -> !autoRunning).whileTrue(new TriggerRun(stroage));
+    // 11/20：TriggerRun 放開後 ShootFeed 停著；之後再射一發（擊發馬達轉速掉下來那一刻）→ 重新啟動 ShootFeed，
+    // 而且這一發就開始送料。shotJustFired 放最前面，每個週期都會被呼叫（and 會短路），上升緣才判斷得對。
+    new Trigger(this::shotJustFired).and(this::manualOrAssistShooting).and(() -> !autoRunning)
+        .and(() -> !manualTriggerPushed()).and(this::storageIdle)
+        .onTrue(new ShootFeed(stroage, turret::isTriggerStopped, () -> false, true)
+            .onlyWhile(() -> controller.getHID().getRightSwitch()));
 
     configureBindings();
   }
@@ -206,15 +223,29 @@ public class RobotContainer {
       seedWallHeadingNow.set(false);
     }).ignoringDisable(true));
 
+    // 11/20：開機擺法 = 砲台朝右、車頭（Front frame）朝九宮格 → 車身 Luna 打到的是側邊，不是九宮格。
+    // 不先設定基準的話，兩顆 Luna 讀到側牆（平的）會被學成「九宮格牆」，之後右側轉向九宮格時 IMU 偏角錯 90° 而且不會自己修正。
+    // 開機等陀螺儀有讀值後，用 StartYawToWallDeg（開機擺放角度）設定基準；之後 IMU 偏角 > 45° 就不會拿側牆學習。
+    CommandScheduler.getInstance().schedule(
+        Commands.waitSeconds(kBootSeedDelaySec).andThen(Commands.runOnce(() -> {
+          seedWallHeading();
+          Logger.recordOutput("RangeSensor/BootSeeded", true);
+        })).ignoringDisable(true).withName("BootSeedWallHeading"));
+
     // 自動流程：撥一下就啟動（onTrue）。開始時先把陀螺儀歸零（11/19），再用起點角度設定牆面基準。規則規定啟動後不能再碰遙控器，所以不能用 whileTrue（搖桿放開就會取消）。
     // 左開關關掉（MockDS 停止 → disable）時一併取消。
     // 11/20：觸發改成右搖桿右上（原本左上；送球模式改到左上）
+    // 11/20 修 BUG：左開關打開那一刻 MockDS 才剛啟動、機器人還沒 enable，DeferredCommand 預設 runsWhenDisabled = false
+    // → scheduler 直接丟掉，Auto 永遠不會開始（Auto/Stage 一直 Idle）。外層 ignoringDisable(true) 讓它排得進去，
+    // 開頭先等真的 enable 了才歸零陀螺儀、開始動。
     controller.leftSwitch().and(righttop()).and(isDisable())
       .onTrue(Commands.defer(
-        () -> Commands.runOnce(scoreboard::reset).andThen(Commands.runOnce(drive::resetGyro)).andThen(Commands.runOnce(this::seedWallHeading)).andThen(buildAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true)
+        () -> Commands.runOnce(() -> Logger.recordOutput("Auto/Stage", "WaitEnable"))
+            .andThen(Commands.waitUntil(org.wpilib.driverstation.RobotState::isEnabled))
+            .andThen(Commands.runOnce(scoreboard::reset)).andThen(Commands.runOnce(drive::resetGyro)).andThen(Commands.runOnce(this::seedWallHeading)).andThen(buildAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true)
             .beforeStarting(() -> autoRunning = true).finallyDo(() -> autoRunning = false),
-        java.util.Set.of(drive, turret)
-      ));
+        java.util.Set.of(drive, turret, stroage)
+      ).ignoringDisable(true));
 
     controller.leftSwitch().and(midtop()).and(isDisable())
       .onTrue(Commands.runOnce(() -> {
@@ -263,13 +294,11 @@ public class RobotContainer {
         )
       );
 
+    // 11/20：底盤不再用 Commands.idle（不送指令，馬達會維持最後的速度）→ 交給底盤預設指令，holdDrive() 時送速度 0 鎖住
     controller.rightSwitch().and(isManual())
       .whileTrue(
-        Commands.parallel(
-          new ManualTurret(turret, () -> controller.getRightY(), () -> controller.getLeftX() > 0.3,
-            () -> turretLidar.getDistanceMeters().orElse(Double.NaN)),
-          Commands.idle(drive)
-        )
+        new ManualTurret(turret, () -> controller.getRightY(), () -> controller.getLeftX() > 0.3,
+          () -> turretLidar.getDistanceMeters().orElse(Double.NaN))
       );
     
     
@@ -281,18 +310,20 @@ public class RobotContainer {
     RangeSensors.seedWallHeading(startYawToWallDeg.get());
   }
 
-  /** 11/20：Assist 射擊中左搖桿 Y 推過這個值（往前，Y 為負）→ L298N Trigger 手動正轉。 */
+  /** 11/20：Manual／Assist 射擊中左搖桿 Y 推過這個值（往前推，Y 為正：FlySky 讀值 = (µs − 1500)/500，往上推 µs 變大）→ L298N Trigger 手動正轉（留一點死區，避免搖桿回中時抖動）。 */
   private static final double kManualTriggerThreshold = 0.3;
+  /** 手動 Trigger 放開後多撐多久才停（FlySky 短暫斷線時搖桿會歸零）。 */
+  private static final double kManualTriggerReleaseSec = 0.3;
 
   /**
    * 11/20：搖桿對齊時左搖桿有輸入 → 中斷對齊。
-   * Assist 射擊中左搖桿 X 是擊發、往前推（Y < 0）是手動 Trigger，都不算；只有往後拉會中斷。
+   * Assist 射擊中左搖桿 X 是擊發、往前推（Y > 0）是手動 Trigger，都不算；只有往後拉（Y < 0）會中斷。
    */
   private static final double kAlignOverrideThreshold = 0.15;
 
   private boolean leftStickOverride() {
     boolean y = assistShooting()
-        ? controller.getLeftY() > kAlignOverrideThreshold
+        ? controller.getLeftY() < -kAlignOverrideThreshold
         : Math.abs(controller.getLeftY()) > kAlignOverrideThreshold;
     boolean x = !assistShooting() && Math.abs(controller.getLeftX()) > kAlignOverrideThreshold;
     return x || y;
@@ -302,9 +333,36 @@ public class RobotContainer {
     return Constants.kRobotMode == RobotMode.kAssist && controller.getHID().getRightSwitch();
   }
 
-  /** 底盤不吃搖桿：Assist 射擊中（左搖桿 X 是擊發）、送球模式。 */
+  /** Manual 或 Assist 模式、右開關打開（射擊狀態）。 */
+  private boolean manualOrAssistShooting() {
+    return (Constants.kRobotMode == RobotMode.kManual || Constants.kRobotMode == RobotMode.kAssist)
+        && controller.getHID().getRightSwitch();
+  }
+
+  /** Manual／Assist 射擊中左搖桿往前推 → TriggerRun。 */
+  private boolean manualTriggerPushed() {
+    return manualOrAssistShooting() && controller.getLeftY() > kManualTriggerThreshold;
+  }
+
+  private boolean lastTriggerStopped = true;
+
+  /** 擊發馬達轉速剛從高於門檻掉到以下（= 剛射出一顆）。每個週期只能呼叫一次。 */
+  private boolean shotJustFired() {
+    boolean stopped = turret.isTriggerStopped();
+    boolean fired = stopped && !lastTriggerStopped;
+    lastTriggerStopped = stopped;
+    return fired;
+  }
+
+  /** Storage 沒有 ShootFeed／TriggerRun 在跑（只有預設指令）。 */
+  private boolean storageIdle() {
+    Command current = stroage.getCurrentCommand();
+    return current == null || current == stroage.getDefaultCommand();
+  }
+
+  /** 底盤鎖住（速度 0、不吃搖桿）：Manual／Assist 射擊中、送球模式。 */
   private boolean holdDrive() {
-    return assistShooting() || Constants.kRobotMode == RobotMode.kFeed;
+    return manualOrAssistShooting() || Constants.kRobotMode == RobotMode.kFeed;
   }
 
   private boolean storageRunsByDefault() {
@@ -376,7 +434,7 @@ public class RobotContainer {
 
   /** 依選單產生新的自動流程指令（同一個指令物件不能重複組合，所以每次都重建）。 */
   private Command buildAuto() {
-    return AutoRoutines.build(drive, vision, turret, turretLidar, currentPlan(), startYawToWallDeg.get());
+    return AutoRoutines.build(drive, vision, turret, turretLidar, stroage, currentPlan(), startYawToWallDeg.get());
   }
 
   /**

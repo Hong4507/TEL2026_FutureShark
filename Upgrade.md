@@ -610,3 +610,30 @@ YOLO 只負責**水平對準**九宮格的某一欄；牆面角度仍由 TF-Luna
 - 右搖桿 Y 微調仰角 ±0.1 rad（放開回 0）；搖桿在選列區時不微調。
 - 左搖桿 X 往右推擊發，同 Manual：推下去那一刻擊發 0.15 s，要再射就放開再推（舊版按住會一直擊發、而且要飛輪到速才射）。
 - 有設 `setAimHeight` → 記分板知道是哪一列。NT：`Assist/Row`、`Assist/AdjustRad`、`Assist/PitchRad`、`Assist/AtSpeed`。
+
+## 自動流程改版、Vision 瞄準修正、射擊時鎖底盤（2026-11-20）
+
+**自動流程（`AutoRoutines`）**
+- 起點車頭朝九宮格（`StartYawToWallDeg` = −90）：盲走 `/Tuning/Auto/BlindApproachMeters`（2.55 m）→ 逆時針轉 90° → **不再前後走到 3.25 m、不 LaserAlign**，原地用融合距離（Luna×2／Luna單邊+IMU／Limelight，即時讀）/ cos(轉角) 查射擊表。
+  ⚠️ 模擬裡起點 TargetDistance **5.5–6.0 m** 才找得到洞；6.1 m 以上砲台 Luna 光束打太高 → 不射。
+- Luna 找洞：每發前確認砲台 Luna 還在洞裡才射；不在 → 左右各小掃 6° 重找，找不到就停止（`Auto/Stage` = `Luna-LostHole`）。
+- 每發間隔 `/Tuning/Auto/ShotIntervalSec`（5 s，擊發到擊發）。整段 Auto 跑 `ShootFeed`（Auto 中右開關的 ShootFeed 不會啟動，避免中斷 Auto）。
+- 飛輪：盲走、轉向、找洞時都不轉；Luna 找到洞／視覺第一次對準完才加速。
+- 新選項 Auto Method「只盲走＋轉向（不瞄準、不射）」（`AutoMethod.APPROACH_ONLY`）。
+- `TurretLidar.setHoldInHole`：Auto 停在洞裡射的期間，不因「比基準遠超過 4 s」把洞後面的東西學成板子基準（不然第 2 發後會判斷沒對到洞）。
+- Luna 能不能用：先等最多 0.5 s 再判斷（剛開始還沒讀到第一筆會被當成斷線）。
+- **BUG 修正：Auto 永遠 Idle**。左開關打開那一刻機器人還沒 enable，`DeferredCommand` 預設不能在 disable 時排程 → 被丟掉。外層加 `ignoringDisable(true)`，開頭等 enable（`Auto/Stage` = `WaitEnable`）。
+- 啟動：右搖桿**先壓右上**再打開左開關；停止：左開關關掉。
+
+**Vision 瞄準**
+- `/Tuning/VisionTurnAlign/AimTrimDeg`（預設 1°，先猜的）：對準完再順時針多轉（實機要再順時針一點點才準）。偏車頭側加大、偏車尾側減小；1° ≈ 3.3 m 外 5.8 cm。
+
+**Manual／Assist 射擊（右開關打開）**
+- 底盤鎖住：底盤預設指令送速度 0（Manual 原本用 `Commands.idle(drive)` 不送指令，馬達會維持最後速度）。
+- 左搖桿往前推（Y > 0.3；這支 FlySky 往上推是正值，舊版寫成 Y < 0 所以一直沒作用）→ `TriggerRun`：中斷 ShootFeed，只讓 L298N Trigger 一直正轉、Storage 停；放開後 Storage／Trigger 都停；**再射一發** → 重新啟動 ShootFeed、那一發就開始送料（或右開關關掉再打開）。
+
+**場地**：洞後面是白色網布、再後面透明帆布。白網布反射強，若離板面 < 10 cm（`/Tuning/TurretLidar/HoleMarginMeters`），砲台 Luna 會找不到洞 —— 待量距離。
+- 手動 Trigger 診斷（11/20，實機顯示 ManualTrigger 但不轉）：`Storage/TriggerRunActive`、`Storage/TriggerRunStarts`（一直增加 = 一直被取消又啟動）、`Storage/TriggerPin`（程式最後寫給 L298N IN 腳的值 +1／-1／0；另有 `StorageLeftPin`、`StorageRightPin`。⚠️ SystemCore Smart I/O 不能用 `DigitalOutput.get()` 讀回，會丟 -3 讓程式當掉，所以是程式自己記的值）。結束時 `ShootFeedState` 會變 `ManualTrigger-Interrupted／-End`。搖桿放開後多撐 0.3 s 才停（FlySky 斷線時搖桿會歸零）。
+- 暫時測試用：`/Tuning/Turret/DryFire`（預設 false）。true → 擊發 SparkMax 不轉（送 0 V），射出偵測改看「有沒有下擊發指令」：擊發指令結束那一刻 = 射出一顆，ShootFeed 等照常反應。比賽前確認是 false。
+- ShootFeed（11/21）：偵測到射出後先 **L298N Trigger 單獨轉 0.7 s**（`kShotFeedPreTriggerSec`，`ShootFeedState` = `PreTrigger`）→ Trigger＋Storage 一起轉 1.7 s → Trigger 單獨轉 0.7 s → 停（一發共 3.1 s）。
+- 11/21：底盤加速度限制全關。`ArcadeDrive`（Manual／Assist 搖桿開車）拿掉 `SlewRateLimiter(1)`，推搖桿立刻到速；`Move`（沒在用）也一起拿掉。Auto 的 `DriveDistance`／`TurnByAngle`／對準指令本來就只有限速、沒有加速度限制，所以不變，還是一樣慢。

@@ -9,6 +9,11 @@ import frc.robot.subsystems.turret.ShotTable;
 import frc.robot.subsystems.turret.TurretConstants;
 
 public class ColumnShot extends Command {
+  /** 擊發時 trigger 轉多久（秒）。 */
+  public static final double kFireSec = 0.15;
+  /** 一發的週期（擊發 + 等待）；這發算完、command 結束時，距離擊發大約這麼久。 */
+  public static final double kCycleSec = 1.2;
+
   private final Turret turret;
   private final double targetHeightMeters;
   private final int targetFiredCount;
@@ -64,9 +69,9 @@ public class ColumnShot extends Command {
     }
 
     if (reloadTimer.isRunning()) {
-      if (reloadTimer.get() < 0.2) {
+      if (reloadTimer.get() < kFireSec) {
         turret.setTrigger(12);
-      } else if (reloadTimer.get() < 1.2) {
+      } else if (reloadTimer.get() < kCycleSec) {
         turret.setTrigger(0);
       } else {
         reloadTimer.reset();

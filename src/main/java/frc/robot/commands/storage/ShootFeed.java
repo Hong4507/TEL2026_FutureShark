@@ -14,13 +14,14 @@ import frc.robot.subsystems.storage.Stroage;
  *
  * <ol>
  *   <li>等待：兩個都停。</li>
- *   <li>偵測到射出（擊發 SparkMax 轉速掉到門檻以下的那一刻）→ L298N Trigger 和 Storage <b>一起轉</b> {@code kShotFeedTriggerSec} 秒。</li>
+ *   <li>偵測到射出（擊發 SparkMax 轉速掉到門檻以下的那一刻）→ 先只有 L298N Trigger <b>單獨轉</b> {@code kShotFeedPreTriggerSec} 秒（11/21）。</li>
+ *   <li>L298N Trigger 和 Storage <b>一起轉</b> {@code kShotFeedTriggerSec} 秒。</li>
  *   <li>Storage 停、L298N Trigger <b>繼續轉</b> {@code kShotFeedStorageSec} 秒。</li>
  *   <li>回到等待。</li>
  * </ol>
- * 送料途中又射一發 → 從第 2 步重新開始。右開關關掉 → 指令結束，全部停止。
+ * 送料途中又射一發 → 從第 2 步（Trigger 單獨轉）重新開始。右開關關掉 → 指令結束，全部停止。
  *
- * <p>11/20：{@code manualTrigger} 為 true 時（Assist 射擊中左搖桿往前推）L298N Trigger 一律正轉，Storage 照上面的流程。
+ * <p>11/20：{@code manualTrigger} 為 true 時 L298N Trigger 一律正轉（目前沒用到：Manual／Assist 射擊中左搖桿往前推改由 {@link TriggerRun} 中斷這個指令）。
  *
  * @see frc.robot.subsystems.turret.Turret#ballFired()
  */
@@ -30,6 +31,7 @@ public class ShootFeed extends Command {
   private final BooleanSupplier triggerStopped;
   /** 手動讓 L298N Trigger 正轉。 */
   private final BooleanSupplier manualTrigger;
+  private final boolean startFeeding;
   private final Timer timer = new Timer();
   private boolean lastStopped;
   private boolean feeding;
@@ -41,6 +43,15 @@ public class ShootFeed extends Command {
   }
 
   public ShootFeed(Stroage stroage, BooleanSupplier triggerStopped, BooleanSupplier manualTrigger) {
+    this(stroage, triggerStopped, manualTrigger, false);
+  }
+
+  /**
+   * @param startFeeding true = 一開始就當作剛射出一顆、直接進送料流程（11/20：TriggerRun 之後再射一發才重新啟動，
+   *     那一發本身也要補球）。
+   */
+  public ShootFeed(Stroage stroage, BooleanSupplier triggerStopped, BooleanSupplier manualTrigger, boolean startFeeding) {
+    this.startFeeding = startFeeding;
     this.stroage = stroage;
     this.triggerStopped = triggerStopped;
     this.manualTrigger = manualTrigger;
@@ -51,10 +62,14 @@ public class ShootFeed extends Command {
   public void initialize() {
     // 進入射擊模式時擊發馬達本來就停著，不能算成一發
     lastStopped = triggerStopped.getAsBoolean();
-    feeding = false;
-    detected = 0;
-    timer.stop();
-    stop();
+    feeding = startFeeding;
+    detected = startFeeding ? 1 : 0;
+    if (startFeeding) {
+      timer.restart();
+    } else {
+      timer.stop();
+      stop();
+    }
   }
 
   @Override
@@ -72,16 +87,24 @@ public class ShootFeed extends Command {
     Logger.recordOutput("Storage/ManualTrigger", manual);
     String state;
     double t = timer.get();
-    if (feeding && t < kShotFeedTriggerSec) {
-      // 第 1 段：Trigger＋Storage 一起轉
+    double together = kShotFeedPreTriggerSec + kShotFeedTriggerSec;
+    if (feeding && t < kShotFeedPreTriggerSec) {
+      // 第 1 段（11/21）：Trigger 先單獨轉，Storage 停
+      stroage.disableStorage();
+      stroage.setTriggerDirection(true);
+      stroage.setTriggerSpeed(1);
+      state = "PreTrigger";
+    } else if (feeding && t < together) {
+      // 第 2 段：Trigger＋Storage 一起轉
+      stroage.setStorageDirection(true);
       stroage.setTriggerDirection(true);
       stroage.setStorageSpeed(1);
       stroage.setTriggerSpeed(1);
       state = "Trigger+Storage";
-    } else if (feeding && t < kShotFeedTriggerSec + kShotFeedStorageSec) {
-      // 第 2 段：Storage 停、Trigger 繼續轉
+    } else if (feeding && t < together + kShotFeedStorageSec) {
+      // 第 3 段：Storage 停、Trigger 繼續轉
       stroage.disableStorage();
-      stroage.setStorageDirection(true);
+      stroage.setTriggerDirection(true);
       stroage.setTriggerSpeed(1);
       state = "TriggerOnly";
     } else {

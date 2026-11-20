@@ -385,7 +385,7 @@ public class FlySkyController {
   }
 
   /**
-   * Get the Y axis value of left side of the controller. Back is positive.
+   * Get the Y axis value of left side of the controller. Up (forward) is positive: value = (µs − 1500) / 500 and pushing up raises µs (11/20 checked; not the Xbox convention).
    *
    * @return The axis value.
    */
@@ -394,7 +394,7 @@ public class FlySkyController {
   }
 
   /**
-   * Get the Y axis value of right side of the controller. Back is positive.
+   * Get the Y axis value of right side of the controller. Up (forward) is positive: value = (µs − 1500) / 500 and pushing up raises µs (11/20 checked; not the Xbox convention).
    *
    * @return The axis value.
    */

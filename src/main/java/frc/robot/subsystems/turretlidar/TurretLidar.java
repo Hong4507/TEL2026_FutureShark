@@ -70,6 +70,8 @@ public class TurretLidar extends SubsystemBase {
       new LoggedNetworkNumber("/Tuning/TurretLidar/HoleMarginMeters", kDefaultBaselineHoleMarginMeters);
   /** 讀值比預期板子距離近超過這個值 → 前面被擋住。 */
   public static final double kBlockedMarginMeters = 0.3;
+  /** 偏角超過這個值就不用它修正（車身沒對著九宮格）。 */
+  static final double kMaxYawRad = Math.toRadians(45);
   /** 狀態要連續維持這麼久才算數，避免邊緣閃爍。 */
   public static final double kDebounceSeconds = 0.06;
   /** 洞的半徑（Ø40 cm），用來估光束打在哪一列。 */
@@ -95,6 +97,11 @@ public class TurretLidar extends SubsystemBase {
   private double farSince = Double.NaN;
   /** 「比基準遠」持續超過這麼久就不是洞（過一個洞最多約 3 s）。 */
   static final double kMaxFarSec = 4.0;
+  /**
+   * 11/20：自動流程對準洞後原地射（每發隔 5 s）時設 true：車子沒在動，一直「比基準遠」就是停在洞裡，
+   * 不能因為超過 {@link #kMaxFarSec} 就把箱子當成新的板子基準（不然第 2 發之後會判斷成沒對到洞）。
+   */
+  private boolean holdInHole = false;
   private Beam beam = Beam.NO_DATA;
   private Beam rawBeam = Beam.NO_DATA;
   private boolean throughHole = false;
@@ -118,7 +125,8 @@ public class TurretLidar extends SubsystemBase {
 
     OptionalDouble wall = wallDistanceMeters.get();
     double yaw = yawErrorRad.getAsDouble();
-    if (!Double.isFinite(yaw)) yaw = 0;
+    // 11/20：偏角 > 45° = 車身沒對著九宮格（例如開機時車頭朝九宮格、砲台朝側邊），偏角拿來修正讀值沒意義（cos → 0）
+    if (!Double.isFinite(yaw) || Math.abs(yaw) > kMaxYawRad) yaw = 0;
     horizontal = wall.isPresent() ? (wall.getAsDouble() + kInboardMeters) / Math.cos(yaw) : Double.NaN;
     double beamHeight = beamHeightAtBoard(horizontal);
     // 11/20：原地轉找洞時光束斜打，讀值 ≈ 正對距離 / cos(yaw)，轉 20° 會變遠 6%（3 m 外約 0.2 m），
@@ -140,7 +148,7 @@ public class TurretLidar extends SubsystemBase {
       // 一直「比基準遠」超過 kMaxFarSec → 不是洞，是車子離牆變遠了 → 基準改成現在的讀值
       baseline.touch(now);
       if (Double.isNaN(farSince)) farSince = now;
-      if (now - farSince > kMaxFarSec) {
+      if (now - farSince > kMaxFarSec && !holdInHole) {
         baseline.reset(now, squareReading);
         farSince = Double.NaN;
       }
@@ -312,6 +320,13 @@ public class TurretLidar extends SubsystemBase {
 
   public boolean isConnected() {
     return inputs.connected;
+  }
+
+  /** 見 {@link #holdInHole}。 */
+  public void setHoldInHole(boolean hold) {
+    holdInHole = hold;
+    if (!hold) farSince = Double.NaN;
+    Logger.recordOutput("TurretLidar/HoldInHole", hold);
   }
 
   /** 鏡頭到板面的「正對」水平距離（不含 yaw 造成的斜距）；沒有牆距 = NaN。原地轉找洞換算角度用。 */

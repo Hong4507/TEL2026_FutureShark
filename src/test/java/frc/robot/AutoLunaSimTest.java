@@ -20,6 +20,7 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.simulation.SimHooks;
+import org.wpilib.system.Timer;
 import org.wpilib.units.measure.Angle;
 
 import frc.FSLib.rangefinder.RangeSensorConstants;
@@ -98,6 +99,23 @@ class AutoLunaSimTest {
   }
 
   private double endTargetDistance = Double.NaN;
+  private AutoMethod method = AutoMethod.LUNA;
+  /** 飛輪第一次被要求轉的時候機器人在哪（NaN = 沒轉過）。 */
+  private double spinUpY = Double.NaN;
+  private double spinUpHeadingDeg = Double.NaN;
+  /** Stroage 佔用 DIO，同一個 JVM 只能建一次 → 共用。 */
+  private static frc.robot.subsystems.storage.Stroage sharedStorage;
+
+  private static frc.robot.subsystems.storage.Stroage storage() {
+    if (sharedStorage == null) sharedStorage = new frc.robot.subsystems.storage.Stroage();
+    else CommandScheduler.getInstance().registerSubsystem(sharedStorage); // teardown 會 unregisterAllSubsystems
+    return sharedStorage;
+  }
+
+  /** true = 和實機一樣帶 Storage（整段跑 ShootFeed）。 */
+  private boolean useStorage = false;
+  /** 每一發擊發的時間（秒）。 */
+  private final List<Double> shotTimes = new ArrayList<>();
   /** 模擬車身 Luna 在黑板上的最遠量程。 */
   private double kLunaMaxRangeMeters = 4.6;
 
@@ -145,15 +163,28 @@ class AutoLunaSimTest {
       private boolean firing = false;
 
       @Override
+      public void setVelocity(double up, double down) {
+        if ((up > 0 || down > 0) && Double.isNaN(spinUpY)) {
+          spinUpY = drive.getPose().getY();
+          spinUpHeadingDeg = drive.getPose().getRotation().getDegrees();
+        }
+        super.setVelocity(up, down);
+      }
+
+      @Override
       public void setTrigger(double volts) {
-        if (volts > 0 && !firing) shots.add(hitY());
+        if (volts > 0 && !firing) {
+          shots.add(hitY());
+          shotTimes.add(Timer.getTimestamp());
+        }
         firing = volts > 0;
         super.setTrigger(volts);
       }
     };
 
-    Plan plan = new Plan(Half.FIRST, side, false, TargetColumn.MID, AutoMethod.LUNA);
-    Command auto = AutoRoutines.build(drive, null, turret, lidar, plan, startYawToWallDeg);
+    Plan plan = new Plan(Half.FIRST, side, false, TargetColumn.MID, method);
+    Command auto = AutoRoutines.build(drive, null, turret, lidar, useStorage ? storage() : null,
+        plan, startYawToWallDeg);
     CommandScheduler.getInstance().schedule(auto);
     double t = 0;
     while (auto.isScheduled() && t < 60) {
@@ -245,14 +276,15 @@ class AutoLunaSimTest {
     assertEquals(9, r.shots.size());
   }
 
-  /** 11/19：起點車頭朝九宮格（StartYawToWallDeg = −90）→ 先逆時針轉 90° 讓右側朝九宮格，再找洞射 9 發。 */
+  /** 11/19：起點車頭朝九宮格（StartYawToWallDeg = −90）→ 盲走 2.55 m（起點 TargetDistance 5.8 m）→ 逆時針轉 90° → 找洞射 9 發。 */
   @ParameterizedTest(name = "車頭朝九宮格 {0} 從 y={1} 出發 → 欄 y={2}")
   @CsvSource({
     "RIGHT, 0.40, 1.1",
     "LEFT,  3.60, 2.9",
   })
   void frontToGridTurnsFirst(StartSide side, double startY, double expectedY) {
-    Run r = run(side, startY, new TurretLidarIOSim(() -> drive.getPose()), 0, -90);
+    double startHorizontal = 5.80 - RangeSensorConstants.kShooterInboardMeters + TurretLidar.kInboardMeters;
+    Run r = run(side, startY, new TurretLidarIOSim(() -> drive.getPose()), 0, -90, startHorizontal);
     assertAllAt(r.shots, 9, expectedY);
     assertEquals(90, r.endHeadingDeg, 26, "轉完右側朝九宮格（原地轉找洞最多 25°）");
   }
@@ -271,20 +303,73 @@ class AutoLunaSimTest {
     for (double v : r.shots) assertEquals(expectedY, v, 0.03, "停在洞中間");
   }
 
-  /** 11/19：起點離九宮格 5.8–7.0 m、車頭朝九宮格 → 盲走 2.55 m → 轉 90° 量 → 開到 3.25 m → 找洞射 9 發。 */
-  @ParameterizedTest(name = "車頭朝九宮格、TargetDistance {0} m 出發、Luna 量程 {1} m → 3.25 m 射擊")
+  /**
+   * 11/20：車頭朝九宮格 → 盲走 2.55 m → 逆時針轉 90° → 不再前後走，原地用融合距離找洞射 9 發。
+   * 模擬起點 5.5–6.0 m 都找得到洞；6.1 m 以上（射擊時 > 3.55 m，再加上原地轉斜打）光束打不到洞的高度 → 不射。
+   */
+  @ParameterizedTest(name = "車頭朝九宮格、TargetDistance {0} m 出發 → 盲走 2.55 m 後原地射")
   @CsvSource({
-    "5.80, 4.6",
-    "6.40, 4.6",
-    "7.00, 4.6",
-    "7.00, 3.6",   // 量程更短：要往前補走再量
+    "5.50", "5.60", "5.70", "5.80", "5.90", "6.00",   // 模擬：6.10 以上砲台 Luna 找不到洞（射擊時 > 3.55 m）
   })
-  void driveToShootDistanceFirst(double startTarget, double lunaRange) {
-    kLunaMaxRangeMeters = lunaRange;
+  void blindApproachThenShootInPlace(double startTarget) {
     double startHorizontal = startTarget - RangeSensorConstants.kShooterInboardMeters + TurretLidar.kInboardMeters;
     Run r = run(StartSide.RIGHT, 0.40, new TurretLidarIOSim(() -> drive.getPose()), 0, -90, startHorizontal);
-    assertEquals(3.25, endTargetDistance, 0.05, "射擊距離");
+    assertEquals(startTarget - 2.55, endTargetDistance, 0.05, "轉完不再前後走");
     assertAllAt(r.shots, 9, kRightTargetY);
     assertEquals(90, r.endHeadingDeg, 26);
+  }
+
+  /** 11/20：實機版本（帶 Storage、整段 ShootFeed）：車頭朝九宮格 5.8 m 起跑，照樣射 9 發。 */
+  @Test
+  void withStorageShootFeed() {
+    useStorage = true;
+    double startHorizontal = 5.80 - RangeSensorConstants.kShooterInboardMeters + TurretLidar.kInboardMeters;
+    Run r = run(StartSide.RIGHT, 0.40, new TurretLidarIOSim(() -> drive.getPose()), 0, -90, startHorizontal);
+    assertAllAt(r.shots, 9, kRightTargetY);
+    // 11/20：盲走、轉向、找洞時飛輪都不轉；轉完找到洞（右側朝九宮格附近、停在洞的角度）才加速
+    assertEquals(r.endHeadingDeg, spinUpHeadingDeg, 0.5, "找到洞、停在射擊角度才開始加速");
+  }
+
+  /** 11/20：「只盲走＋轉向」：走 2.55 m、逆時針轉 90° 就結束，不射、不再轉。 */
+  @Test
+  void approachOnlyStopsAfterTurn() {
+    method = AutoMethod.APPROACH_ONLY;
+    useStorage = true;
+    double startHorizontal = 5.80 - RangeSensorConstants.kShooterInboardMeters + TurretLidar.kInboardMeters;
+    Run r = run(StartSide.RIGHT, 0.40, new TurretLidarIOSim(() -> drive.getPose()), 0, -90, startHorizontal);
+    assertEquals(0, r.shots.size(), "不射");
+    assertTrue(Double.isNaN(spinUpY), "只盲走＋轉向：飛輪不轉");
+    assertEquals(90, r.endHeadingDeg, 2, "右側朝九宮格");
+    assertEquals(5.80 - 2.55, endTargetDistance, 0.05, "盲走 2.55 m");
+    assertTrue(r.seconds < 10, "轉完就結束，實際 " + r.seconds);
+  }
+
+  /** 11/20：每發之間（擊發到擊發）至少隔 5 秒，讓 ShootFeed 送球。 */
+  @Test
+  void shotsAreSpacedFiveSeconds() {
+    run(StartSide.RIGHT, 0.40, new TurretLidarIOSim(() -> drive.getPose()));
+    assertEquals(9, shotTimes.size());
+    for (int i = 1; i < shotTimes.size(); i++) {
+      double gap = shotTimes.get(i) - shotTimes.get(i - 1);
+      assertTrue(gap >= 5.0 - 0.03 && gap < 5.5, "第 " + i + "→" + (i + 1) + " 發間隔 " + gap);
+    }
+  }
+
+  /** 11/20：射到一半砲台 Luna 不在洞裡了（例如被撞歪）→ 小掃重找也找不到 → 剩下的不射。 */
+  @Test
+  void stopsShootingWhenHoleLost() {
+    TurretLidarIOSim sim = new TurretLidarIOSim(() -> drive.getPose());
+    Run r = run(StartSide.RIGHT, 0.40, new TurretLidarIO() {
+      @Override
+      public void updateInputs(TurretLidarIOInputs inputs) {
+        sim.updateInputs(inputs);
+        if (shotTimes.size() >= 3) {
+          // 光束一直打在板上
+          inputs.distanceMeters = TurretLidar.idealHorizontalMeters(1) / Math.cos(Math.toRadians(TurretLidar.kMountPitchDeg));
+          inputs.strength = 1000;
+        }
+      }
+    });
+    assertEquals(3, r.shots.size(), "對不到洞之後不能再射");
   }
 }

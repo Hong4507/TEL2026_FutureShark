@@ -9,8 +9,10 @@ public class StorageConstants {
   public static final int kStorageRightReversePort = 5; // Smart I/O 5
   public static final int kStorageRightForwardPort = 4; // Smart I/O 4
 
-  /** 射擊模式（右開關開）偵測到射出後：L298N Trigger 和 Storage 一起轉這麼久（秒）。 */
-  public static final double kShotFeedTriggerSec = 2;
+  /** 11/21：射擊模式（右開關開）偵測到射出後，先只讓 L298N Trigger 單獨轉這麼久（秒），Storage 停著。 */
+  public static final double kShotFeedPreTriggerSec = 0.7;
+  /** 接著 L298N Trigger 和 Storage 一起轉這麼久（秒）。 */
+  public static final double kShotFeedTriggerSec = 1.7;
   /** 接著 Storage 停、L298N Trigger 繼續轉這麼久（秒）。 */
   public static final double kShotFeedStorageSec = 0.7;
 }

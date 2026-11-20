@@ -220,4 +220,29 @@ class RangeFusionTest {
     assertEquals(Source.LUNA_SINGLE_IMU, res.source());
     assertEquals(WALL, res.wallDistance(), 1e-6);
   }
+
+  /**
+   * 11/20 開機（砲台朝右、車頭朝九宮格）：開機設定基準之前，兩顆 Luna 讀到側牆會被學成「九宮格牆」。
+   * RobotContainer 開機 0.5 s 後用 StartYawToWallDeg 設定基準 → 要能把錯的基準蓋掉，之後右側轉向九宮格時偏角正確。
+   */
+  @Test
+  void bootSeedOverridesSideWallLearnedBeforeSeed() {
+    RangeFusion f = new RangeFusion(RangeReference.GRID_WALL);
+    double boot = 0.2;
+    double[] side = readings(3.0, 0); // 側牆，平的、> 2.5 m
+    f.update(0, side[0], side[1], true, true, boot, NONE);
+    assertEquals(boot, f.getWallHeading(), 1e-9, "沒設定基準時會把側牆學成九宮格牆（這就是要修的問題）");
+
+    f.seedWallHeading(boot, Math.toRadians(-90)); // 開機設定
+    for (int i = 1; i <= 100; i++) f.update(i * 0.02, side[0], side[1], true, true, boot, NONE);
+    assertEquals(boot + Math.toRadians(90), f.getWallHeading(), 1e-9, "IMU 偏角 > 45° 時不能再拿側牆學習");
+    assertEquals(0, f.getWallHeadingResets());
+
+    // 逆時針轉 90° → 右 frame 正對九宮格
+    double[] r = readings(WALL, 0);
+    Result res = f.update(3, r[0], r[1], true, true, boot + Math.toRadians(90), NONE);
+    assertEquals(Source.LUNA_DUAL, res.source());
+    assertEquals(0, res.yawRad(), 1e-6);
+    assertEquals(0, f.getLunaImuDiffRad(), 1e-6);
+  }
 }

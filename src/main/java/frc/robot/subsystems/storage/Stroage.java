@@ -38,11 +38,23 @@ public class Stroage extends SubsystemBase {
       // 先把另一支腳拉低，避免兩支腳同時為高
       (forward ? reversePin : forwardPin).set(false);
       (forward ? forwardPin : reversePin).set(true);
+      state = forward ? 1 : -1;
     }
 
     void stop() {
       forwardPin.set(false);
       reversePin.set(false);
+      state = 0;
+    }
+
+    /**
+     * 診斷：最後寫出去的狀態（+1 = 正轉腳高、-1 = 反轉腳高、0 = 停）。
+     * ⚠️ 不能用 DigitalOutput.get() 讀回來：SystemCore Smart I/O 不支援，會丟 UncleanStatusException（-3）讓程式當掉。
+     */
+    private int state = 0;
+
+    int state() {
+      return state;
     }
   }
 
@@ -84,5 +96,9 @@ public class Stroage extends SubsystemBase {
       disableStorage();
       disableTrigger();
     }
+    // 11/20 診斷：L298N IN 腳實際輸出（+1 正轉、-1 反轉、0 停）。程式顯示有轉但這裡是 0 → 程式問題；這裡 ±1 但馬達不轉 → 接線／L298N／電源
+    org.littletonrobotics.junction.Logger.recordOutput("Storage/TriggerPin", trigger.state());
+    org.littletonrobotics.junction.Logger.recordOutput("Storage/StorageLeftPin", storageLeft.state());
+    org.littletonrobotics.junction.Logger.recordOutput("Storage/StorageRightPin", storageRight.state());
   }
 }

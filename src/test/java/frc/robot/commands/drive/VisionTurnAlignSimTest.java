@@ -40,10 +40,13 @@ class VisionTurnAlignSimTest {
     DriverStationSim.setRobotMode(RobotMode.AUTONOMOUS);
     DriverStationSim.setEnabled(true);
     DriverStationSim.notifyNewData();
+    // 幾何測試：模擬是理想的，不加實機瞄準修正
+    VisionTurnAlign.aimTrimDeg = () -> 0;
   }
 
   @AfterEach
   void teardown() {
+    VisionTurnAlign.aimTrimDeg = () -> 0;
     CommandScheduler.getInstance().cancelAll();
     CommandScheduler.getInstance().unregisterAllSubsystems();
     DriverStationSim.setEnabled(false);
@@ -80,6 +83,28 @@ class VisionTurnAlignSimTest {
     "LIT, 1.6",
   })
   void turnsOntoColumn(VisionAlign.Target target, double startY) {
+    double err = alignAndHitError(target, startY);
+    assertEquals(0, err, kFinalTolerance);
+  }
+
+  /** 11/20：AimTrimDeg = 正 → 對準完再順時針多轉 → 落點往車尾（−y）移 射擊距離 × tan(修正角)。 */
+  @ParameterizedTest(name = "{0} 從 y={1}，修正 {2}°")
+  @CsvSource({
+    "MID, 2.0, 1.0",
+    "MID, 2.4, 2.0",
+    "RIGHT, 1.0, 1.0",
+  })
+  void aimTrimTurnsClockwise(VisionAlign.Target target, double startY, double trimDeg) {
+    double untrimmed = alignAndHitError(target, startY);
+    CommandScheduler.getInstance().cancelAll();
+    CommandScheduler.getInstance().unregisterAllSubsystems();
+    VisionTurnAlign.aimTrimDeg = () -> trimDeg;
+    double trimmed = alignAndHitError(target, startY);
+    double expected = -RangeSensorConstants.kFallbackDistanceMeters * Math.tan(Math.toRadians(trimDeg));
+    assertEquals(expected, trimmed - untrimmed, 0.02, "落點應該往車尾移");
+  }
+
+  private double alignAndHitError(VisionAlign.Target target, double startY) {
     int litColumn = 0;
     double distance = RangeSensorConstants.kFallbackDistanceMeters;
     drive = new Drive(new DriveIOSim(), new GyroIO() {});
@@ -109,6 +134,6 @@ class VisionTurnAlignSimTest {
         target, startY, err, drive.getPose().getRotation().getDegrees() - 90, moved, t, cmd.succeeded());
     assertTrue(cmd.succeeded(), "應該對準成功");
     assertTrue(moved < 0.05, "原地轉不應該沿牆走");
-    assertEquals(0, err, kFinalTolerance);
+    return err;
   }
 }
