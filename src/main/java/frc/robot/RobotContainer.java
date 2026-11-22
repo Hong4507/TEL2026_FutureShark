@@ -177,6 +177,8 @@ public class RobotContainer {
     autoMethodChooser.addDefault("砲台Luna找洞（不用視覺）", AutoMethod.LUNA);
     autoMethodChooser.add("視覺（加分洞＋VisionAlign）", AutoMethod.VISION);
     autoMethodChooser.add("只盲走＋轉向（不瞄準、不射）", AutoMethod.APPROACH_ONLY);
+    autoMethodChooser.add("假自瞄（右Frame朝九宮格起步，不射）", AutoMethod.FAKE_AIM);
+    autoMethodChooser.add("走3m＋逆轉90°＋往中間1m（車頭朝九宮格起步，不射）", AutoMethod.DRIVE_TURN_DRIVE);
     scoreboard = new Scoreboard(turret, vision, () -> currentPlan().half());
     // 開機就給 Auto/Stage 一個值，Elastic 的「Auto 階段」才不會是空的
     Logger.recordOutput("Auto/Stage", "Idle");
@@ -242,7 +244,7 @@ public class RobotContainer {
       .onTrue(Commands.defer(
         () -> Commands.runOnce(() -> Logger.recordOutput("Auto/Stage", "WaitEnable"))
             .andThen(Commands.waitUntil(org.wpilib.driverstation.RobotState::isEnabled))
-            .andThen(Commands.runOnce(scoreboard::reset)).andThen(Commands.runOnce(drive::resetGyro)).andThen(Commands.runOnce(this::seedWallHeading)).andThen(buildAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true)
+            .andThen(Commands.runOnce(scoreboard::reset)).andThen(Commands.runOnce(drive::resetGyro)).andThen(Commands.runOnce(this::seedWallHeadingForAuto)).andThen(buildAuto()).andThen(enterAssistAfterAuto()).until(controller.leftSwitch().negate()).ignoringDisable(true)
             .beforeStarting(() -> autoRunning = true).finallyDo(() -> autoRunning = false),
         java.util.Set.of(drive, turret, stroage)
       ).ignoringDisable(true));
@@ -304,7 +306,25 @@ public class RobotContainer {
     
   }
 
-  /** 右開關關著時 Storage／L298N Trigger 要不要一直正轉。 */
+  /**
+   * 11/21：Auto 正常跑完 → 直接進 Assist 模式（不用關左開關再重選）。
+   * 放在 until(左開關關掉) 裡面：Auto 被左開關中斷時不會執行，模式照常由 stopMockDS 設回 kDisable。
+   * 注意：進 Assist 時右開關如果已經是開的，AssistTurret 會馬上啟動（規則上 Auto 中不碰遙控器，正常是關著）。
+   */
+  private Command enterAssistAfterAuto() {
+    return Commands.runOnce(() -> {
+      Constants.kRobotMode = RobotMode.kAssist;
+      Logger.recordOutput("Mode", "Assist");
+    }).ignoringDisable(true);
+  }
+
+  /** 11/21：Auto 開始時用「這個流程的起點擺法」設定牆面基準（假自瞄 = 右 Frame 朝牆 = 0°）。 */
+  private void seedWallHeadingForAuto() {
+    double deg = AutoRoutines.startYawToWallDeg(currentPlan(), startYawToWallDeg.get());
+    Logger.recordOutput("RangeSensor/AutoSeedYawToWallDeg", deg);
+    RangeSensors.seedWallHeading(deg);
+  }
+
   /** 車子擺在已知角度（起點）時呼叫：IMU 牆面基準 = 現在角度 − StartYawToWallDeg。之後 Luna×2 一致時會再慢慢修正。 */
   private void seedWallHeading() {
     RangeSensors.seedWallHeading(startYawToWallDeg.get());

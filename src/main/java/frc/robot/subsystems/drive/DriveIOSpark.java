@@ -39,7 +39,7 @@ public class DriveIOSpark implements DriveIO {
   public DriveIOSpark() {
     SparkMaxConfig frontLeftMotorConfig = new SparkMaxConfig();
     frontLeftMotorConfig
-      .idleMode(IdleMode.kBrake)
+      .idleMode(IdleMode.kCoast)
       .inverted(true) 
       .smartCurrentLimit(30);
     frontLeftMotorConfig.signals.apply(SparkUtil.optimizedSignalConfig())
@@ -54,7 +54,7 @@ public class DriveIOSpark implements DriveIO {
 
     SparkMaxConfig backLeftMotorConfig = new SparkMaxConfig();
     backLeftMotorConfig
-      .idleMode(IdleMode.kBrake)
+      .idleMode(IdleMode.kCoast)
       .follow(frontLeftMotor, false)
       .smartCurrentLimit(30);
     backLeftMotorConfig.signals.apply(SparkUtil.optimizedAllSignalConfig());
@@ -62,7 +62,7 @@ public class DriveIOSpark implements DriveIO {
 
     SparkMaxConfig frontRightMotorConfig = new SparkMaxConfig();
     frontRightMotorConfig
-      .idleMode(IdleMode.kBrake)
+      .idleMode(IdleMode.kCoast)
       .inverted(false)
       .smartCurrentLimit(30);
     frontRightMotorConfig.signals.apply(SparkUtil.optimizedSignalConfig())
@@ -77,7 +77,7 @@ public class DriveIOSpark implements DriveIO {
 
     SparkMaxConfig backRightMotorConfig = new SparkMaxConfig();
     backRightMotorConfig
-      .idleMode(IdleMode.kBrake)
+      .idleMode(IdleMode.kCoast)
       .follow(frontRightMotor, false)
       .smartCurrentLimit(30);
     backRightMotorConfig.signals.apply(SparkUtil.optimizedAllSignalConfig());

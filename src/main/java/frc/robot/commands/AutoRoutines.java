@@ -41,7 +41,7 @@ public final class AutoRoutines {
   /**
    * 11/19：起點離九宮格 5.8–7.0 m（TargetDistance）。先朝九宮格盲走這麼遠，再逆時針轉 90° 讓右側朝九宮格。
    * 11/20：轉完<b>不再前後走到固定射程</b>，原地用融合距離（Luna×2／Luna單邊+IMU／Limelight）查射擊表。
-   * 砲台 Luna（23°）有效 TargetDistance 約 2.92–3.62 m → 起點超過約 6.2 m 時可能找不到洞（找不到就不射）。
+   * 砲台 Luna（ 23°）有效 TargetDistance 約 2.92–3.62 m → 起點超過約 6.2 m 時可能找不到洞（找不到就不射）。
    */
   private static final LoggedNetworkNumber kBlindApproach = new LoggedNetworkNumber("/Tuning/Auto/BlindApproachMeters", 2.55);
   /** 11/20：原地轉找到洞後先停穩再射（剛停下來車身還會轉一點，第一發會偏）。 */
@@ -138,7 +138,20 @@ public final class AutoRoutines {
     /** 原本的視覺流程（加分洞＋VisionAlign）。 */
     VISION("視覺"),
     /** 11/20：只盲走＋轉向（右側朝九宮格）就停，不瞄準、不射，飛輪不轉。測試起點擺法／轉向用。 */
-    APPROACH_ONLY("只盲走＋轉向");
+    APPROACH_ONLY("只盲走＋轉向"),
+    /**
+     * 11/21：假自瞄。起點<b>右 Frame 朝九宮格</b>（不是車頭朝牆）→ 往中間走 50 cm → 順時針轉 90°（車頭朝九宮格）
+     * → 朝九宮格走 2.55 m → 逆時針轉回 90°（右 Frame 朝九宮格）→ 原地慢慢左右來回轉 30 s。不射、飛輪不轉、Storage 不轉。
+     * 牆面基準固定用 0°（右 Frame 朝牆），不管 StartYawToWallDeg，見 {@link AutoRoutines#startYawToWallDeg}。
+     */
+    FAKE_AIM("假自瞄（不射）"),
+    /**
+     * 11/21：起點<b>車頭朝九宮格</b>（同其他流程，牆面基準用 StartYawToWallDeg）→ 往前走 3 m
+     * → 逆時針轉 90°（右 Frame 朝九宮格）→ 往中間走 1 m。不射、飛輪不轉、Storage 不轉。
+     * 左右起點都轉逆時針（砲台在右側，一定要右 Frame 朝九宮格）；往中間的方向用 {@link Plan#lunaDirection()}：
+     * 右起點往車頭（前進）、左起點往車尾（後退）。
+     */
+    DRIVE_TURN_DRIVE("走3m＋逆轉90°＋走1m（不射）");
 
     public final String label;
 
@@ -171,6 +184,95 @@ public final class AutoRoutines {
     }
   }
 
+  /**
+   * 11/21：Auto 開始時設定 IMU 牆面基準要用的「起點車身相對牆面偏角」。
+   * 假自瞄起點是右 Frame 朝九宮格 → 0°；其他流程是車頭朝九宮格 → 用 Elastic 的 StartYawToWallDeg（−90）。
+   * 基準錯 90° 的話 IMU 偏角永遠 &gt; 45°，兩顆 Luna／單 Luna＋IMU 都會被丟掉，只剩 Limelight／預設距離。
+   */
+  public static double startYawToWallDeg(Plan plan, double configuredDeg) {
+    return plan.method() == AutoMethod.FAKE_AIM ? 0.0 : configuredDeg;
+  }
+
+  /** 假自瞄：往中間走多遠（m）。 */
+  private static final LoggedNetworkNumber kFakeAimSideMeters = new LoggedNetworkNumber("/Tuning/Auto/FakeAim/SideMeters", 0.5);
+  /** 假自瞄：轉完朝九宮格走多遠（m）。 */
+  private static final LoggedNetworkNumber kFakeAimApproachMeters = new LoggedNetworkNumber("/Tuning/Auto/FakeAim/ApproachMeters", 2.55);
+  /** 假自瞄：原地來回轉多久（s）。 */
+  private static final LoggedNetworkNumber kFakeAimSweepSec = new LoggedNetworkNumber("/Tuning/Auto/FakeAim/SweepSec", 30.0);
+  /** 假自瞄：左右各轉幾度。 */
+  private static final LoggedNetworkNumber kFakeAimAmplitudeDeg = new LoggedNetworkNumber("/Tuning/Auto/FakeAim/AmplitudeDeg", 15.0);
+  /** 假自瞄：來回一次幾秒（15° / 6 s → 最快約 16°/s）。 */
+  private static final LoggedNetworkNumber kFakeAimPeriodSec = new LoggedNetworkNumber("/Tuning/Auto/FakeAim/PeriodSec", 6.0);
+  private static final double kFakeAimTurnP = 0.6;      // 輪速（m/s）/ rad，同 TurnByAngle
+  private static final double kFakeAimMaxWheel = 0.2;
+
+  /**
+   * 假自瞄流程（{@link AutoMethod#FAKE_AIM}）。只要求底盤；飛輪、Storage 沒有指令 → 不轉。
+   * 往中間的方向用 {@link Plan#lunaDirection()}（右起點、右 Frame 朝牆 → 往車頭）。
+   */
+  private static Command fakeAim(Drive drive, Plan plan) {
+    double[] start = {0};
+    double[] center = {0};
+    Timer sweepTimer = new Timer();
+    Command sweep = Commands.run(() -> {
+      double t = sweepTimer.get();
+      double period = Math.max(1.0, kFakeAimPeriodSec.get());
+      // sin 從 0 開始、整數個週期時回到中間
+      double target = center[0] + Math.toRadians(kFakeAimAmplitudeDeg.get()) * Math.sin(2 * Math.PI * t / period);
+      double err = org.wpilib.math.util.MathUtil.angleModulus(target - drive.getGyroYawRad());
+      double turn = Math.clamp(kFakeAimTurnP * err, -kFakeAimMaxWheel, kFakeAimMaxWheel);
+      // arcadeDriveIK：zRotation 正 = 逆時針
+      var w = org.wpilib.drive.DifferentialDrive.arcadeDriveIK(0, turn, false);
+      drive.setVelocity(w.left, w.right);
+      Logger.recordOutput("Auto/FakeAim/TargetDeg", Math.toDegrees(target));
+    }, drive)
+        .beforeStarting(() -> {
+          // 以起點朝向（右 Frame 朝九宮格）為中心來回轉，轉回來沒轉準也不會偏
+          center[0] = start[0];
+          sweepTimer.restart();
+        })
+        .until(() -> sweepTimer.hasElapsed(kFakeAimSweepSec.get()))
+        .finallyDo(() -> drive.setVelocity(0, 0));
+    return Commands.sequence(
+      Commands.runOnce(() -> start[0] = drive.getGyroYawRad()),
+      log("FakeAim-Side"),
+      new DriveDistance(drive, () -> plan.lunaDirection() * kFakeAimSideMeters.get()),
+      log("FakeAim-TurnCW"),
+      // 順時針 90°（逆時針為正 → −90°），用起點絕對角度，走直線時的偏差不會累積
+      TurnByAngle.toHeading(drive, () -> start[0] - Math.PI / 2),
+      log("FakeAim-Approach"),
+      new DriveDistance(drive, kFakeAimApproachMeters::get),
+      log("FakeAim-TurnBack"),
+      // 11/21：逆時針轉回起點朝向 → 右 Frame（砲台）再朝九宮格，然後才原地來回轉
+      TurnByAngle.toHeading(drive, () -> start[0]),
+      log("FakeAim-Sweep"),
+      sweep,
+      log("Done")
+    ).withName("Auto-" + plan.describe());
+  }
+
+  /** 走3m＋逆轉90°＋走1m：第一段往前走多遠（m）。 */
+  private static final LoggedNetworkNumber kDtdFirstMeters = new LoggedNetworkNumber("/Tuning/Auto/DriveTurnDrive/FirstMeters", 3.0);
+  /** 走3m＋逆轉90°＋走1m：轉完往中間走多遠（m，右起點前進、左起點後退）。 */
+  private static final LoggedNetworkNumber kDtdSecondMeters = new LoggedNetworkNumber("/Tuning/Auto/DriveTurnDrive/SecondMeters", 1.0);
+
+  /** {@link AutoMethod#DRIVE_TURN_DRIVE}：只要求底盤，飛輪、Storage 沒有指令 → 不轉。 */
+  private static Command driveTurnDrive(Drive drive, Plan plan) {
+    double[] start = {0};
+    return Commands.sequence(
+      Commands.runOnce(() -> start[0] = drive.getGyroYawRad()),
+      log("DTD-Forward"),
+      new DriveDistance(drive, kDtdFirstMeters::get),
+      log("DTD-TurnCCW"),
+      // 逆時針 90°（逆時針為正），用起點絕對角度
+      TurnByAngle.toHeading(drive, () -> start[0] + Math.PI / 2),
+      log("DTD-Forward2"),
+      // 右 Frame 朝九宮格時：右起點往車頭是中間、左起點往車尾是中間
+      new DriveDistance(drive, () -> plan.lunaDirection() * kDtdSecondMeters.get()),
+      log("Done")
+    ).withName("Auto-" + plan.describe());
+  }
+
   /** 依 {@link Plan#method()} 產生自動流程。 */
   public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Plan plan) {
     return build(drive, vision, turret, turretLidar, null, plan, 0);
@@ -190,11 +292,14 @@ public final class AutoRoutines {
    */
   public static Command build(Drive drive, Vision vision, Turret turret, TurretLidar turretLidar, Stroage stroage,
       Plan plan, double startYawToWallDeg) {
+    // 11/21：假自瞄自己處理走位／轉向（起點擺法不同），不接盲走＋轉向，也不跑 ShootFeed
+    if (plan.method() == AutoMethod.FAKE_AIM) return fakeAim(drive, plan);
+    if (plan.method() == AutoMethod.DRIVE_TURN_DRIVE) return driveTurnDrive(drive, plan);
     boolean approachOnly = plan.method() == AutoMethod.APPROACH_ONLY;
     Command main = switch (plan.method()) {
       case LUNA -> lunaColumn(drive, turret, turretLidar, plan);
       case VISION -> bonusThenColumn(drive, vision, turret, plan);
-      case APPROACH_ONLY -> log("Done").withName("Auto-" + plan.describe());
+      case APPROACH_ONLY, FAKE_AIM, DRIVE_TURN_DRIVE -> log("Done").withName("Auto-" + plan.describe());
     };
     String name = main.getName();
     boolean needsTurn = Math.abs(startYawToWallDeg) > 1 && (plan.method() != AutoMethod.VISION || !plan.runPath());
